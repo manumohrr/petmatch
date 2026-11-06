@@ -21,6 +21,7 @@ import MinhasSolicitacoes from './screens/MinhasSolicitacoes.js';
 import SolicitarAdocao from './screens/SolicitarAdocao.js';
 
 // TELAS DE GERENCIAMENTO
+import GerenciarAnimais from './screens/GerenciarAnimais.js';
 import CadastrarAnimal from './screens/CadastrarAnimal.js';
 import EditarAnimal from './screens/EditarAnimal.js';
 import Usuarios from './screens/Usuarios.js';
@@ -210,18 +211,19 @@ export default function App() {
               </Stack.Screen>
 
               <Stack.Screen
-                name="Animais"
-                options={{
-                  title: 'Animais para adoção',
-                }}
-              >
-                {(props) => (
-                  <Animais
-                    {...props}
-                    usuario={usuario}
-                  />
-                )}
-              </Stack.Screen>
+  name="Animais"
+  options={{
+    headerShown: false,
+  }}
+>
+  {(props) => (
+    <Animais
+      {...props}
+      usuario={usuario}
+      sair={sair}
+    />
+  )}
+</Stack.Screen>
 
               <Stack.Screen
                 name="DetalhesAnimal"
@@ -308,6 +310,22 @@ export default function App() {
                   </Stack.Screen>
                 </Stack.Group>
               )}
+
+              {ehAdmin && (
+  <Stack.Screen
+    name="GerenciarAnimais"
+    options={{
+      title: 'Gerenciar animais',
+    }}
+  >
+    {(props) => (
+      <GerenciarAnimais
+        {...props}
+        usuario={usuario}
+      />
+    )}
+  </Stack.Screen>
+)}
 
               {ehAdmin && (
                 <Stack.Screen

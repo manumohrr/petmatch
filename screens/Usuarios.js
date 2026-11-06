@@ -1,32 +1,39 @@
 
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import {
+  ActivityIndicator,
+  Alert,
   FlatList,
+  Platform,
+  Pressable,
   StyleSheet,
   Text,
+  TextInput,
   View,
-  Alert,
+  useWindowDimensions,
 } from 'react-native';
 
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 
 import {
-  Aviso,
-  Botao,
-  Carregamento,
-  Pagina,
-  Painel,
-  cores,
-  estilos,
-} from '../components/ui.js';
-
-import {
   fetchAutenticado,
   lerResposta,
 } from '../services/api.js';
 
-// NÍVEIS DE ACESSO DO PETMATCH
+const CORES = {
+  fundo: '#FAF8F3',
+  branco: '#FFFFFF',
+  texto: '#252B35',
+  secundario: '#737B87',
+  laranja: '#FF7628',
+  laranjaClaro: '#FFF0E6',
+  verde: '#579F13',
+  verdeClaro: '#EDF5E7',
+  borda: '#EAE6DF',
+  vermelho: '#C54848',
+};
+
 const niveis = [
   'adotante',
   'ong',
@@ -34,7 +41,6 @@ const niveis = [
   'admin',
 ];
 
-// EXIBIR NOMES MAIS AMIGÁVEIS
 function nomeNivel(nivel) {
   const nomes = {
     adotante: 'Adotante',
@@ -43,75 +49,333 @@ function nomeNivel(nivel) {
     admin: 'Administrador',
   };
 
-  return nomes[nivel] || nivel;
+  return nomes[nivel] || nivel || 'Não informado';
+}
+
+function estiloNivel(nivel) {
+  switch (nivel) {
+    case 'admin':
+      return {
+        cor: '#A15C18',
+        fundo: '#FFF0DF',
+      };
+
+    case 'ong':
+      return {
+        cor: '#376B0C',
+        fundo: CORES.verdeClaro,
+      };
+
+    case 'protetor':
+      return {
+        cor: '#466BA0',
+        fundo: '#EBF2FC',
+      };
+
+    default:
+      return {
+        cor: CORES.secundario,
+        fundo: '#F0F0F0',
+      };
+  }
+}
+
+function Botao({
+  titulo,
+  onPress,
+  secundario = false,
+  disabled = false,
+  carregando = false,
+}) {
+  return (
+    <Pressable
+      style={[
+        estilos.botao,
+        secundario && estilos.botaoSecundario,
+        disabled && estilos.botaoDesabilitado,
+      ]}
+      onPress={onPress}
+      disabled={disabled}
+      accessibilityRole="button"
+    >
+      {carregando ? (
+        <ActivityIndicator
+          color={
+            secundario ? CORES.texto : CORES.branco
+          }
+        />
+      ) : (
+        <Text
+          style={[
+            estilos.textoBotao,
+            secundario && estilos.textoBotaoSecundario,
+          ]}
+        >
+          {titulo}
+        </Text>
+      )}
+    </Pressable>
+  );
+}
+
+function CartaoUsuario({
+  pessoa,
+  proprioUsuario,
+  alterando,
+  bloqueado,
+  nivelSelecionado,
+  onSelecionar,
+  onSalvar,
+}) {
+  const nivelVisual = estiloNivel(pessoa.nivel);
+  const nivelAtual = nivelSelecionado || pessoa.nivel;
+  const temAlteracao = nivelAtual !== pessoa.nivel;
+
+  return (
+    <View style={estilos.cartao}>
+      <View style={estilos.cabecalhoCartao}>
+        <View style={estilos.avatar}>
+          <Text style={estilos.inicialAvatar}>
+            {(pessoa.nome || 'U')
+              .charAt(0)
+              .toUpperCase()}
+          </Text>
+        </View>
+
+        <View style={estilos.dadosUsuario}>
+          <Text
+            style={estilos.nomeUsuario}
+            numberOfLines={2}
+          >
+            {pessoa.nome || 'Usuário sem nome'}
+          </Text>
+
+          <Text
+            style={estilos.emailUsuario}
+            numberOfLines={2}
+          >
+            {pessoa.email || 'E-mail não informado'}
+          </Text>
+
+          {proprioUsuario ? (
+            <Text style={estilos.identificacao}>
+              Sua conta
+            </Text>
+          ) : null}
+        </View>
+      </View>
+
+      <View style={estilos.divisor} />
+
+      <Text style={estilos.rotulo}>
+        NÍVEL DE ACESSO ATUAL
+      </Text>
+
+      <View
+        style={[
+          estilos.etiquetaNivel,
+          { backgroundColor: nivelVisual.fundo },
+        ]}
+      >
+        <Text
+          style={[
+            estilos.textoNivel,
+            { color: nivelVisual.cor },
+          ]}
+        >
+          {nomeNivel(pessoa.nivel)}
+        </Text>
+      </View>
+
+      {proprioUsuario ? (
+        <Text style={estilos.observacao}>
+          Por segurança, você não pode alterar
+          seu próprio nível de acesso.
+        </Text>
+      ) : (
+        <View style={estilos.areaPermissoes}>
+          <Text style={estilos.tituloPermissoes}>
+            Alterar permissão
+          </Text>
+
+          <Text style={estilos.descricaoPermissoes}>
+            Selecione o nível que deseja atribuir
+            a este usuário.
+          </Text>
+
+          <View style={estilos.opcoes}>
+            {niveis.map((nivel) => {
+              const selecionado = nivelAtual === nivel;
+
+              return (
+                <Pressable
+                  key={nivel}
+                  style={[
+                    estilos.opcao,
+                    selecionado && estilos.opcaoSelecionada,
+                    bloqueado && estilos.opcaoBloqueada,
+                  ]}
+                  disabled={bloqueado}
+                  onPress={() =>
+                    onSelecionar(nivel)
+                  }
+                  accessibilityRole="radio"
+                  accessibilityState={{
+                    checked: selecionado,
+                    disabled: bloqueado,
+                  }}
+                >
+                  <View
+                    style={[
+                      estilos.radio,
+                      selecionado && estilos.radioSelecionado,
+                    ]}
+                  >
+                    {selecionado ? (
+                      <View style={estilos.radioCentro} />
+                    ) : null}
+                  </View>
+
+                  <Text
+                    style={[
+                      estilos.textoOpcao,
+                      selecionado &&
+                        estilos.textoOpcaoSelecionada,
+                    ]}
+                  >
+                    {nomeNivel(nivel)}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+
+          <Botao
+            titulo={
+              alterando
+                ? 'Salvando...'
+                : 'Salvar alteração'
+            }
+            carregando={alterando}
+            disabled={!temAlteracao || bloqueado}
+            onPress={onSalvar}
+          />
+        </View>
+      )}
+    </View>
+  );
 }
 
 export default function Usuarios({ usuario }) {
+  const { width } = useWindowDimensions();
+
   const [usuarios, setUsuarios] = useState([]);
   const [carregando, setCarregando] = useState(true);
+  const [atualizando, setAtualizando] = useState(false);
   const [alterandoId, setAlterandoId] = useState(null);
+  const [pesquisa, setPesquisa] = useState('');
+  const [filtroNivel, setFiltroNivel] = useState('todos');
+  const [selecoes, setSelecoes] = useState({});
   const [erro, setErro] = useState('');
   const [sucesso, setSucesso] = useState('');
 
-  // BUSCAR USUÁRIOS CADASTRADOS
-  async function carregarUsuarios(signal) {
-    setCarregando(true);
-    setErro('');
+  const duasColunas = width >= 950;
 
-    try {
-      // ROTA PROTEGIDA PARA ADMINISTRADORES
-      const resposta = await fetchAutenticado(
-        '/usuarios',
-        { signal }
-      );
+  const ehAdmin = usuario?.nivel === 'admin';
 
-      const dados = await lerResposta(resposta);
+  const carregarUsuarios = useCallback(
+    async (mostrarCarregamento = true, signal) => {
+      if (mostrarCarregamento) {
+        setCarregando(true);
+      } else {
+        setAtualizando(true);
+      }
 
-      if (!signal?.aborted) {
-        setUsuarios(
-          Array.isArray(dados) ? dados : []
+      setErro('');
+
+      try {
+        const resposta = await fetchAutenticado(
+          '/usuarios',
+          { signal }
         );
-      }
-    } catch (falha) {
-      if (!signal?.aborted) {
-        setErro(
-          falha.message ||
-          'Não foi possível carregar os usuários.'
-        );
-      }
-    } finally {
-      if (!signal?.aborted) {
-        setCarregando(false);
-      }
-    }
-  }
 
-  // CARREGAR AO ABRIR A TELA
+        const dados = await lerResposta(resposta);
+
+        if (!signal?.aborted) {
+          setUsuarios(
+            Array.isArray(dados) ? dados : []
+          );
+        }
+      } catch (falha) {
+        if (!signal?.aborted) {
+          setErro(
+            falha.message ||
+            'Não foi possível carregar os usuários.'
+          );
+        }
+      } finally {
+        if (!signal?.aborted) {
+          setCarregando(false);
+          setAtualizando(false);
+        }
+      }
+    },
+    []
+  );
+
   useFocusEffect(
-    useCallback(function () {
-      if (usuario?.nivel !== 'admin') {
-        return undefined;
-      }
+    useCallback(() => {
+      if (!ehAdmin) return undefined;
 
       const controle = new AbortController();
 
-      carregarUsuarios(controle.signal);
+      carregarUsuarios(true, controle.signal);
 
-      return function () {
-        controle.abort();
-      };
-    }, [usuario?.nivel])
+      return () => controle.abort();
+    }, [ehAdmin, carregarUsuarios])
   );
 
-  // ATUALIZAR NÍVEL DO USUÁRIO
-  async function alterarNivel(pessoa, novoNivel) {
+  const usuariosFiltrados = useMemo(() => {
+    const termo = pesquisa.trim().toLowerCase();
+
+    return usuarios.filter((pessoa) => {
+      const correspondePesquisa =
+        !termo ||
+        String(pessoa.nome || '')
+          .toLowerCase()
+          .includes(termo) ||
+        String(pessoa.email || '')
+          .toLowerCase()
+          .includes(termo) ||
+        String(pessoa.id)
+          .includes(termo);
+
+      const correspondeNivel =
+        filtroNivel === 'todos' ||
+        pessoa.nivel === filtroNivel;
+
+      return correspondePesquisa && correspondeNivel;
+    });
+  }, [usuarios, pesquisa, filtroNivel]);
+
+  const totalAdotantes = usuarios.filter(
+    (pessoa) => pessoa.nivel === 'adotante'
+  ).length;
+
+  const totalResponsaveis = usuarios.filter(
+    (pessoa) =>
+      pessoa.nivel === 'ong' ||
+      pessoa.nivel === 'protetor'
+  ).length;
+
+  const totalAdministradores = usuarios.filter(
+    (pessoa) => pessoa.nivel === 'admin'
+  ).length;
+
+  function confirmarAlteracao(pessoa, novoNivel) {
     if (alterandoId !== null) return;
 
-    setErro('');
-    setSucesso('');
-
-    // IMPEDIR ALTERAÇÃO DO PRÓPRIO NÍVEL
-    if (Number(pessoa.id) === Number(usuario.id)) {
+    if (String(pessoa.id) === String(usuario?.id)) {
       setErro('Você não pode alterar seu próprio nível.');
       return;
     }
@@ -121,16 +385,47 @@ export default function Usuarios({ usuario }) {
       return;
     }
 
-    if (pessoa.nivel === novoNivel) {
+    if (pessoa.nivel === novoNivel) return;
+
+    const mensagem =
+      `Deseja alterar o nível de ${pessoa.nome} ` +
+      `para ${nomeNivel(novoNivel)}?`;
+
+    if (Platform.OS === 'web') {
+      if (window.confirm(mensagem)) {
+        alterarNivel(pessoa, novoNivel);
+      }
+
       return;
     }
 
+    Alert.alert(
+      'Alterar nível de acesso',
+      mensagem,
+      [
+        {
+          text: 'Cancelar',
+          style: 'cancel',
+        },
+        {
+          text: 'Confirmar',
+          onPress: () =>
+            alterarNivel(pessoa, novoNivel),
+        },
+      ]
+    );
+  }
+
+  async function alterarNivel(pessoa, novoNivel) {
+    if (alterandoId !== null) return;
+
+    setErro('');
+    setSucesso('');
     setAlterandoId(pessoa.id);
 
     try {
-      // PUT ATUALIZA O NÍVEL NO BANCO DE DADOS
       const resposta = await fetchAutenticado(
-        '/usuarios/' + pessoa.id + '/nivel',
+        `/usuarios/${pessoa.id}/nivel`,
         {
           method: 'PUT',
           body: JSON.stringify({
@@ -141,282 +436,692 @@ export default function Usuarios({ usuario }) {
 
       const dados = await lerResposta(resposta);
 
-      // ATUALIZAR LISTA LOCAL
-      setUsuarios(function (atuais) {
-        return atuais.map(function (item) {
-          return Number(item.id) === Number(pessoa.id)
+      setUsuarios((atuais) =>
+        atuais.map((item) =>
+          String(item.id) === String(pessoa.id)
             ? { ...item, nivel: novoNivel }
-            : item;
-        });
+            : item
+        )
+      );
+
+      setSelecoes((atuais) => {
+        const novas = { ...atuais };
+        delete novas[String(pessoa.id)];
+        return novas;
       });
 
       setSucesso(
         dados.mensagem ||
-        'Nível de acesso atualizado com sucesso.'
+        `Permissão de ${pessoa.nome} atualizada com sucesso.`
       );
     } catch (falha) {
       setErro(
         falha.message ||
-        'Não foi possível alterar o nível.'
+        'Não foi possível alterar o nível de acesso.'
       );
     } finally {
       setAlterandoId(null);
     }
   }
 
-  // CONFIRMAR ANTES DE ALTERAR
-  function confirmarAlteracao(pessoa, novoNivel) {
-    Alert.alert(
-      'Alterar nível de acesso',
-      'Deseja alterar o nível de ' +
-        pessoa.nome +
-        ' para ' +
-        nomeNivel(novoNivel) +
-        '?',
-      [
-        {
-          text: 'Cancelar',
-          style: 'cancel',
-        },
-        {
-          text: 'Confirmar',
-          onPress: function () {
-            alterarNivel(pessoa, novoNivel);
-          },
-        },
-      ]
-    );
+  function selecionarNivel(id, nivel) {
+    setSelecoes((atuais) => ({
+      ...atuais,
+      [String(id)]: nivel,
+    }));
+
+    setErro('');
+    setSucesso('');
   }
 
-  // RENDERIZAR CADA USUÁRIO
-  function renderizarUsuario({ item }) {
-    const proprioUsuario =
-      Number(item.id) === Number(usuario.id);
-
-    const alterandoEste =
-      alterandoId === item.id;
-
+  if (!ehAdmin) {
     return (
-      <Painel style={locais.cartao}>
-
-        <Text style={locais.nome}>
-          {item.nome}
-          {proprioUsuario ? ' (você)' : ''}
+      <View style={estilos.centralizado}>
+        <Text style={estilos.tituloVazio}>
+          Acesso não autorizado
         </Text>
 
-        <Text style={locais.email}>
-          {item.email}
+        <Text style={estilos.textoAuxiliar}>
+          Apenas administradores podem gerenciar
+          as permissões dos usuários.
         </Text>
-
-        <View style={locais.areaNivel}>
-          <Text style={locais.rotuloNivel}>
-            NÍVEL DE ACESSO
-          </Text>
-
-          <Text style={locais.nivel}>
-            {nomeNivel(item.nivel)}
-          </Text>
-        </View>
-
-        {proprioUsuario ? (
-          <Text style={locais.observacao}>
-            Seu próprio nível de acesso não pode
-            ser alterado.
-          </Text>
-        ) : (
-          <View style={locais.acoes}>
-            <Text style={locais.tituloAcoes}>
-              Alterar para:
-            </Text>
-
-            {niveis
-              .filter(function (nivel) {
-                return nivel !== item.nivel;
-              })
-              .map(function (nivel) {
-                return (
-                  <Botao
-                    key={nivel}
-                    titulo={nomeNivel(nivel)}
-                    variante="secundario"
-                    disabled={alterandoId !== null}
-                    carregando={alterandoEste}
-                    onPress={function () {
-                      confirmarAlteracao(item, nivel);
-                    }}
-                  />
-                );
-              })}
-          </View>
-        )}
-
-      </Painel>
-    );
-  }
-
-  // BLOQUEAR ACESSO NÃO AUTORIZADO
-  if (usuario?.nivel !== 'admin') {
-    return (
-      <Pagina>
-        <Aviso
-          mensagem="Acesso permitido apenas para administradores."
-        />
-      </Pagina>
+      </View>
     );
   }
 
   return (
     <SafeAreaView
-      style={locais.tela}
+      style={estilos.container}
       edges={['left', 'right', 'bottom']}
     >
       <FlatList
-        data={usuarios}
-        extraData={alterandoId}
+        data={usuariosFiltrados}
+        key={duasColunas ? 'duas' : 'uma'}
+        numColumns={duasColunas ? 2 : 1}
         keyExtractor={(item) => String(item.id)}
-        renderItem={renderizarUsuario}
-        contentContainerStyle={locais.conteudo}
-        refreshing={carregando}
-        onRefresh={() => carregarUsuarios()}
-
+        extraData={{ selecoes, alterandoId }}
+        columnWrapperStyle={
+          duasColunas ? estilos.linhaGrade : undefined
+        }
+        contentContainerStyle={estilos.conteudo}
+        refreshing={atualizando}
+        onRefresh={() => {
+          if (alterandoId === null) {
+            carregarUsuarios(false);
+          }
+        }}
         ListHeaderComponent={
-          <View style={locais.cabecalho}>
+          <View>
+            <View style={estilos.cabecalho}>
+              <Text style={estilos.titulo}>
+                Gerenciar usuários
+              </Text>
 
-            <Text style={estilos.etiqueta}>
-              PETMATCH / ADMINISTRAÇÃO
-            </Text>
+              <Text style={estilos.subtitulo}>
+                Visualize as contas cadastradas
+                e gerencie as permissões de acesso
+                dos usuários do PetMatch.
+              </Text>
+            </View>
 
-            <Text style={estilos.titulo}>
-              Gerenciar usuários
-            </Text>
+            {erro ? (
+              <View style={estilos.avisoErro}>
+                <Text style={estilos.textoErro}>
+                  {erro}
+                </Text>
+              </View>
+            ) : null}
 
-            <Text style={estilos.subtitulo}>
-              Visualize as contas cadastradas
-              e gerencie as permissões de
-              adotantes, ONGs e protetores.
-            </Text>
+            {sucesso ? (
+              <View style={estilos.avisoSucesso}>
+                <Text style={estilos.textoSucesso}>
+                  {sucesso}
+                </Text>
+              </View>
+            ) : null}
 
-            <Aviso mensagem={erro} />
+            <View style={estilos.resumos}>
+              <View style={estilos.resumo}>
+                <Text style={estilos.numeroResumo}>
+                  {usuarios.length}
+                </Text>
+                <Text style={estilos.rotuloResumo}>
+                  Total de usuários
+                </Text>
+              </View>
 
-            <Aviso
-              mensagem={sucesso}
-              tipo="sucesso"
-            />
+              <View style={estilos.resumo}>
+                <Text style={estilos.numeroResumo}>
+                  {totalAdotantes}
+                </Text>
+                <Text style={estilos.rotuloResumo}>
+                  Adotantes
+                </Text>
+              </View>
 
-            <Botao
-              titulo="Atualizar lista"
-              variante="secundario"
-              disabled={
-                carregando ||
-                alterandoId !== null
-              }
-              onPress={() => carregarUsuarios()}
-            />
+              <View style={estilos.resumo}>
+                <Text style={estilos.numeroResumo}>
+                  {totalResponsaveis}
+                </Text>
+                <Text style={estilos.rotuloResumo}>
+                  ONGs e protetores
+                </Text>
+              </View>
 
-            <Text style={locais.contagem}>
-              {usuarios.length} usuário(s) cadastrado(s)
-            </Text>
+              <View style={estilos.resumo}>
+                <Text style={estilos.numeroResumo}>
+                  {totalAdministradores}
+                </Text>
+                <Text style={estilos.rotuloResumo}>
+                  Administradores
+                </Text>
+              </View>
+            </View>
 
+            <View style={estilos.areaFiltros}>
+              <Text style={estilos.tituloLista}>
+                Usuários cadastrados
+              </Text>
+
+              <TextInput
+                style={estilos.campoPesquisa}
+                placeholder="Buscar por nome, e-mail ou ID..."
+                placeholderTextColor="#999FA8"
+                value={pesquisa}
+                onChangeText={setPesquisa}
+                autoCapitalize="none"
+              />
+
+              <View style={estilos.filtros}>
+                {[
+                  { valor: 'todos', nome: 'Todos' },
+                  { valor: 'adotante', nome: 'Adotantes' },
+                  { valor: 'ong', nome: 'ONGs' },
+                  { valor: 'protetor', nome: 'Protetores' },
+                  { valor: 'admin', nome: 'Admins' },
+                ].map((filtro) => {
+                  const ativo =
+                    filtroNivel === filtro.valor;
+
+                  return (
+                    <Pressable
+                      key={filtro.valor}
+                      style={[
+                        estilos.filtro,
+                        ativo && estilos.filtroAtivo,
+                      ]}
+                      onPress={() =>
+                        setFiltroNivel(filtro.valor)
+                      }
+                      accessibilityRole="button"
+                    >
+                      <Text
+                        style={[
+                          estilos.textoFiltro,
+                          ativo && estilos.textoFiltroAtivo,
+                        ]}
+                      >
+                        {filtro.nome}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+
+              <View style={estilos.linhaContagem}>
+                <Text style={estilos.contagem}>
+                  {usuariosFiltrados.length}
+                  {usuariosFiltrados.length === 1
+                    ? ' usuário encontrado'
+                    : ' usuários encontrados'}
+                </Text>
+
+                <Pressable
+                  onPress={() => carregarUsuarios(false)}
+                  disabled={
+                    carregando ||
+                    atualizando ||
+                    alterandoId !== null
+                  }
+                  accessibilityRole="button"
+                >
+                  <Text style={estilos.atualizar}>
+                    Atualizar lista
+                  </Text>
+                </Pressable>
+              </View>
+            </View>
           </View>
         }
+        renderItem={({ item }) => {
+          const proprioUsuario =
+            String(item.id) === String(usuario.id);
 
+          return (
+            <View
+              style={[
+                estilos.itemLista,
+                duasColunas && estilos.itemDuasColunas,
+              ]}
+            >
+              <CartaoUsuario
+                pessoa={item}
+                proprioUsuario={proprioUsuario}
+                alterando={
+                  String(alterandoId) === String(item.id)
+                }
+                bloqueado={alterandoId !== null}
+                nivelSelecionado={
+                  selecoes[String(item.id)]
+                }
+                onSelecionar={(nivel) =>
+                  selecionarNivel(item.id, nivel)
+                }
+                onSalvar={() =>
+                  confirmarAlteracao(
+                    item,
+                    selecoes[String(item.id)] ||
+                      item.nivel
+                  )
+                }
+              />
+            </View>
+          );
+        }}
         ListEmptyComponent={
-          carregando ? (
-            <Carregamento
-              mensagem="Carregando usuários..."
-            />
-          ) : (
-            <Painel>
-              <Text style={estilos.texto}>
-                {erro
-                  ? 'Não foi possível carregar os usuários.'
-                  : 'Nenhum usuário encontrado.'}
-              </Text>
-            </Painel>
-          )
+          <View style={estilos.cartaoVazio}>
+            {carregando ? (
+              <>
+                <ActivityIndicator
+                  size="large"
+                  color={CORES.laranja}
+                />
+                <Text style={estilos.textoAuxiliar}>
+                  Carregando usuários...
+                </Text>
+              </>
+            ) : (
+              <>
+                <Text style={estilos.tituloVazio}>
+                  Nenhum usuário encontrado
+                </Text>
+
+                <Text style={estilos.textoAuxiliar}>
+                  {erro
+                    ? 'Não foi possível carregar a lista. Tente atualizar novamente.'
+                    : 'Não encontramos usuários com os filtros selecionados.'}
+                </Text>
+              </>
+            )}
+          </View>
         }
       />
     </SafeAreaView>
   );
 }
 
-const locais = StyleSheet.create({
-  tela: {
+const estilos = StyleSheet.create({
+  container: {
     flex: 1,
-    backgroundColor: cores.fundo,
+    backgroundColor: CORES.fundo,
   },
 
   conteudo: {
     width: '100%',
-    maxWidth: 960,
+    maxWidth: 1250,
     alignSelf: 'center',
     padding: 22,
-    paddingBottom: 48,
+    paddingBottom: 65,
     flexGrow: 1,
   },
 
+  centralizado: {
+    flex: 1,
+    backgroundColor: CORES.fundo,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 25,
+    gap: 15,
+  },
+
   cabecalho: {
-    marginBottom: 18,
+    marginBottom: 28,
+  },
+
+  titulo: {
+    fontSize: 32,
+    fontWeight: '800',
+    color: CORES.texto,
+    marginBottom: 10,
+  },
+
+  subtitulo: {
+    fontSize: 15,
+    color: CORES.secundario,
+    lineHeight: 24,
+    maxWidth: 720,
+  },
+
+  resumos: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
     gap: 12,
+    marginBottom: 35,
+  },
+
+  resumo: {
+    flexGrow: 1,
+    flexBasis: 170,
+    backgroundColor: CORES.branco,
+    borderWidth: 1,
+    borderColor: CORES.borda,
+    borderRadius: 14,
+    padding: 19,
+  },
+
+  numeroResumo: {
+    fontSize: 29,
+    fontWeight: '800',
+    color: CORES.texto,
+    marginBottom: 7,
+  },
+
+  rotuloResumo: {
+    color: CORES.secundario,
+    fontSize: 13,
+  },
+
+  areaFiltros: {
+    marginBottom: 22,
+  },
+
+  tituloLista: {
+    color: CORES.texto,
+    fontSize: 22,
+    fontWeight: '800',
+    marginBottom: 18,
+  },
+
+  campoPesquisa: {
+    backgroundColor: CORES.branco,
+    borderWidth: 1,
+    borderColor: CORES.borda,
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    fontSize: 15,
+    color: CORES.texto,
+    minHeight: 52,
+  },
+
+  filtros: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 9,
+    marginTop: 15,
+  },
+
+  filtro: {
+    backgroundColor: CORES.branco,
+    borderWidth: 1,
+    borderColor: CORES.borda,
+    borderRadius: 20,
+    paddingHorizontal: 15,
+    paddingVertical: 10,
+  },
+
+  filtroAtivo: {
+    backgroundColor: CORES.laranja,
+    borderColor: CORES.laranja,
+  },
+
+  textoFiltro: {
+    color: CORES.secundario,
+    fontSize: 13,
+    fontWeight: '700',
+  },
+
+  textoFiltroAtivo: {
+    color: CORES.branco,
+  },
+
+  linhaContagem: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: 12,
+    marginTop: 20,
+  },
+
+  contagem: {
+    color: CORES.secundario,
+    fontSize: 13,
+  },
+
+  atualizar: {
+    color: CORES.verde,
+    fontSize: 13,
+    fontWeight: '800',
+  },
+
+  linhaGrade: {
+    gap: 18,
+  },
+
+  itemLista: {
+    flex: 1,
+    marginBottom: 18,
+  },
+
+  itemDuasColunas: {
+    minWidth: 0,
   },
 
   cartao: {
-    marginBottom: 16,
+    flex: 1,
+    backgroundColor: CORES.branco,
+    borderWidth: 1,
+    borderColor: CORES.borda,
+    borderRadius: 16,
+    padding: 22,
   },
 
-  nome: {
-    color: cores.texto,
-    fontSize: 21,
-    fontWeight: '700',
-    marginBottom: 8,
+  cabecalhoCartao: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
   },
 
-  email: {
-    color: cores.muted,
-    fontSize: 15,
-    marginBottom: 14,
+  avatar: {
+    width: 52,
+    height: 52,
+    borderRadius: 15,
+    backgroundColor: CORES.laranjaClaro,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 
-  areaNivel: {
-    backgroundColor: '#E8EFE4',
-    padding: 12,
-    borderRadius: 12,
-    marginBottom: 16,
+  inicialAvatar: {
+    color: CORES.laranja,
+    fontSize: 22,
+    fontWeight: '800',
   },
 
-  rotuloNivel: {
-    color: cores.muted,
-    fontSize: 11,
-    fontWeight: '700',
+  dadosUsuario: {
+    flex: 1,
+    minWidth: 0,
+  },
+
+  nomeUsuario: {
+    color: CORES.texto,
+    fontSize: 19,
+    fontWeight: '800',
     marginBottom: 5,
   },
 
-  nivel: {
-    color: cores.verde,
-    fontSize: 16,
-    fontWeight: '700',
-  },
-
-  acoes: {
-    gap: 10,
-  },
-
-  tituloAcoes: {
-    color: cores.texto,
-    fontSize: 14,
-    fontWeight: '600',
-    marginBottom: 4,
-  },
-
-  observacao: {
-    color: cores.muted,
+  emailUsuario: {
+    color: CORES.secundario,
     fontSize: 13,
     lineHeight: 20,
   },
 
-  contagem: {
-    color: cores.muted,
+  identificacao: {
+    color: CORES.verde,
+    fontSize: 12,
+    fontWeight: '700',
+    marginTop: 5,
+  },
+
+  divisor: {
+    height: 1,
+    backgroundColor: CORES.borda,
+    marginVertical: 21,
+  },
+
+  rotulo: {
+    color: CORES.secundario,
+    fontSize: 11,
+    fontWeight: '800',
+    marginBottom: 10,
+  },
+
+  etiquetaNivel: {
+    alignSelf: 'flex-start',
+    borderRadius: 20,
+    paddingHorizontal: 13,
+    paddingVertical: 9,
+  },
+
+  textoNivel: {
+    fontSize: 12,
+    fontWeight: '800',
+  },
+
+  observacao: {
+    color: CORES.secundario,
     fontSize: 13,
-    marginTop: 12,
+    lineHeight: 21,
+    marginTop: 20,
+  },
+
+  areaPermissoes: {
+    marginTop: 24,
+    flex: 1,
+  },
+
+  tituloPermissoes: {
+    color: CORES.texto,
+    fontSize: 16,
+    fontWeight: '800',
+    marginBottom: 7,
+  },
+
+  descricaoPermissoes: {
+    color: CORES.secundario,
+    fontSize: 13,
+    lineHeight: 21,
+    marginBottom: 16,
+  },
+
+  opcoes: {
+    gap: 9,
+    marginBottom: 20,
+  },
+
+  opcao: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    borderWidth: 1,
+    borderColor: CORES.borda,
+    borderRadius: 10,
+    paddingHorizontal: 13,
+    paddingVertical: 13,
+  },
+
+  opcaoSelecionada: {
+    backgroundColor: CORES.laranjaClaro,
+    borderColor: CORES.laranja,
+  },
+
+  opcaoBloqueada: {
+    opacity: 0.65,
+  },
+
+  radio: {
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    borderWidth: 2,
+    borderColor: '#B5B7BC',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  radioSelecionado: {
+    borderColor: CORES.laranja,
+  },
+
+  radioCentro: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: CORES.laranja,
+  },
+
+  textoOpcao: {
+    color: CORES.texto,
+    fontSize: 13,
+    fontWeight: '600',
+    flexShrink: 1,
+  },
+
+  textoOpcaoSelecionada: {
+    color: CORES.texto,
+    fontWeight: '800',
+  },
+
+  botao: {
+    backgroundColor: CORES.laranja,
+    borderRadius: 11,
+    minHeight: 48,
+    paddingHorizontal: 15,
+    paddingVertical: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 'auto',
+  },
+
+  botaoSecundario: {
+    backgroundColor: CORES.branco,
+    borderWidth: 1,
+    borderColor: CORES.borda,
+  },
+
+  botaoDesabilitado: {
+    opacity: 0.45,
+  },
+
+  textoBotao: {
+    color: CORES.branco,
+    fontSize: 14,
+    fontWeight: '800',
+  },
+
+  textoBotaoSecundario: {
+    color: CORES.texto,
+  },
+
+  avisoErro: {
+    backgroundColor: '#FFF0F0',
+    borderRadius: 11,
+    padding: 15,
+    marginBottom: 18,
+  },
+
+  textoErro: {
+    color: CORES.vermelho,
+    fontSize: 13,
+    lineHeight: 21,
+  },
+
+  avisoSucesso: {
+    backgroundColor: CORES.verdeClaro,
+    borderRadius: 11,
+    padding: 15,
+    marginBottom: 18,
+  },
+
+  textoSucesso: {
+    color: CORES.verde,
+    fontSize: 13,
+    lineHeight: 21,
+  },
+
+  cartaoVazio: {
+    backgroundColor: CORES.branco,
+    borderWidth: 1,
+    borderColor: CORES.borda,
+    borderRadius: 16,
+    padding: 30,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 14,
+    minHeight: 200,
+  },
+
+  tituloVazio: {
+    color: CORES.texto,
+    fontSize: 20,
+    fontWeight: '800',
+    textAlign: 'center',
+  },
+
+  textoAuxiliar: {
+    color: CORES.secundario,
+    fontSize: 14,
+    lineHeight: 22,
+    textAlign: 'center',
   },
 });

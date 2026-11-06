@@ -1,9 +1,8 @@
 
-import { useCallback, useState } from 'react';
+import React, { useCallback, useState } from 'react';
 import {
   ActivityIndicator,
   Image,
-  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -12,6 +11,7 @@ import {
   useWindowDimensions,
   View,
 } from 'react-native';
+
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 
@@ -43,16 +43,18 @@ function listaAnimais(dados) {
 
 function fotoAnimal(animal) {
   const foto =
-    animal?.imagem ||
     animal?.foto ||
+    animal?.imagem ||
     animal?.foto_url ||
     animal?.imagem_url;
 
-  if (typeof foto !== 'string' || !foto.trim()) {
-    return null;
-  }
+  return typeof foto === 'string' && foto.trim()
+    ? foto.trim()
+    : null;
+}
 
-  return foto.trim();
+function idAnimal(animal) {
+  return animal?.id ?? animal?.id_animal;
 }
 
 function nomeEspecie(animal) {
@@ -72,24 +74,46 @@ function nomeEspecie(animal) {
 }
 
 function informacaoAnimal(animal) {
+  let idade = null;
+
+  if (
+    animal?.idade !== null &&
+    animal?.idade !== undefined &&
+    animal?.idade !== ''
+  ) {
+    const numero = Number(animal.idade);
+    const meses = animal.unidade_idade === 'meses';
+
+    idade = `${animal.idade} ${
+      meses
+        ? numero === 1 ? 'mês' : 'meses'
+        : numero === 1 ? 'ano' : 'anos'
+    }`;
+  }
+
   return [
     nomeEspecie(animal),
-    animal?.idade ? String(animal.idade) : null,
-    animal?.cidade ? String(animal.cidade) : null,
+    idade,
+    animal?.cidade,
   ]
     .filter(Boolean)
     .join(' • ');
 }
 
-function BotaoMenu({ titulo, ativo, onPress, icone }) {
+function BotaoMenu({
+  titulo,
+  ativo = false,
+  onPress,
+  icone = null,
+}) {
   return (
     <Pressable
       onPress={onPress}
+      accessibilityRole="button"
       style={[
         css.menuBotao,
         ativo && css.menuBotaoAtivo,
       ]}
-      accessibilityRole="button"
     >
       {icone ? (
         <Ionicons
@@ -113,6 +137,7 @@ function BotaoMenu({ titulo, ativo, onPress, icone }) {
 
 export default function Home({
   navigation,
+  route,
   usuario,
   sair,
   atualizarUsuario,
@@ -125,24 +150,31 @@ export default function Home({
   const colunas = desktop ? 3 : tablet ? 2 : 1;
 
   const [animais, setAnimais] = useState([]);
+  const [favoritos, setFavoritos] = useState([]);
   const [carregando, setCarregando] = useState(true);
   const [erro, setErro] = useState('');
   const [busca, setBusca] = useState('');
   const [tipo, setTipo] = useState('Todos');
   const [aba, setAba] = useState('Inicio');
-  const [favoritos, setFavoritos] = useState([]);
 
-  const podeGerenciar =
-    usuario?.nivel === 'ong' ||
-    usuario?.nivel === 'protetor' ||
-    usuario?.nivel === 'admin';
+  useFocusEffect(
+  useCallback(() => {
+    const destino = route?.params?.aba;
 
-  const admin = usuario?.nivel === 'admin';
+    if (destino === 'Sobre' || destino === 'Contato') {
+      setAba(destino);
+    } else {
+      setAba('Inicio');
+    }
+  }, [route?.params?.aba])
+);
 
   const nomeUsuario =
-    usuario?.nome?.trim()?.split(' ')[0] || 'Usuário';
+    usuario?.nome?.trim()?.split(' ')[0] || 'Perfil';
 
   const carregarDados = useCallback(async () => {
+    setCarregando(true);
+
     try {
       const resposta = await fetchAutenticado('/animais');
       const dados = await lerResposta(resposta);
@@ -151,7 +183,10 @@ export default function Home({
       setErro('');
     } catch (falha) {
       if (falha.status !== 401) {
-        setErro('Não foi possível carregar os animais.');
+        setErro(
+          falha.message ||
+          'Não foi possível carregar os animais.'
+        );
       }
     } finally {
       setCarregando(false);
@@ -171,12 +206,15 @@ export default function Home({
 
       setFavoritos(
         lista.map((item) =>
-          String(item.animal_id ?? item.animal?.id ?? item.id)
+          String(
+            item.animal_id ??
+            item.animal?.id ??
+            item.id
+          )
         )
       );
     } catch {
-      // Os animais continuam visíveis mesmo se
-      // a lista de favoritos não carregar.
+      // Os animais continuam visíveis.
     }
   }, []);
 
@@ -198,7 +236,7 @@ export default function Home({
             atualizarUsuario(dados.usuario || dados);
           }
         } catch {
-          // A autenticação é tratada pelo serviço.
+          // A sessão é tratada pelo serviço de API.
         }
       }
 
@@ -207,7 +245,11 @@ export default function Home({
       return () => {
         ativo = false;
       };
-    }, [carregarDados, carregarFavoritos, atualizarUsuario])
+    }, [
+      carregarDados,
+      carregarFavoritos,
+      atualizarUsuario,
+    ])
   );
 
   function abrirAnimais() {
@@ -219,29 +261,32 @@ export default function Home({
   }
 
   function abrirDetalhes(animal) {
+    const id = idAnimal(animal);
+
     navigation.navigate('DetalhesAnimal', {
-      animalId: animal.id,
-      id: animal.id,
+      id,
+      animalId: id,
       animal,
     });
   }
 
   async function alternarFavorito(animal) {
-    const id = String(animal.id);
-    const jaFavorito = favoritos.includes(id);
+    const id = idAnimal(animal);
+
+    if (id === null || id === undefined) return;
+
+    const chave = String(id);
+    const jaFavorito = favoritos.includes(chave);
 
     try {
       const resposta = await fetchAutenticado(
-        jaFavorito ? `/favoritos/${animal.id}` : '/favoritos',
+        jaFavorito ? `/favoritos/${id}` : '/favoritos',
         {
           method: jaFavorito ? 'DELETE' : 'POST',
           ...(!jaFavorito
             ? {
-                headers: {
-                  'Content-Type': 'application/json',
-                },
                 body: JSON.stringify({
-                  animal_id: animal.id,
+                  animal_id: id,
                 }),
               }
             : {}),
@@ -252,18 +297,22 @@ export default function Home({
 
       setFavoritos((anteriores) =>
         jaFavorito
-          ? anteriores.filter((item) => item !== id)
-          : [...anteriores, id]
+          ? anteriores.filter((item) => item !== chave)
+          : [...anteriores, chave]
       );
+
+      setErro('');
     } catch (falha) {
       setErro(
-        falha.message || 'Não foi possível atualizar o favorito.'
+        falha.message ||
+        'Não foi possível atualizar o favorito.'
       );
     }
   }
 
   const animaisFiltrados = animais.filter((animal) => {
     const especie = nomeEspecie(animal);
+
     const correspondeTipo =
       tipo === 'Todos' || especie === tipo;
 
@@ -284,6 +333,24 @@ export default function Home({
   });
 
   const destaques = animaisFiltrados.slice(0, 6);
+
+  const passos = [
+  {
+    icone: 'search-outline',
+    titulo: 'Encontre',
+    texto: 'Conheça os animais disponíveis para adoção.',
+  },
+  {
+    icone: 'heart-outline',
+    titulo: 'Favorite',
+    texto: 'Salve os animais que chamaram sua atenção.',
+  },
+  {
+    icone: 'home-outline',
+    titulo: 'Adote',
+    texto: 'Envie uma solicitação para iniciar o processo.',
+  },
+];
 
   return (
     <View style={css.tela}>
@@ -308,7 +375,7 @@ export default function Home({
                   <Ionicons
                     name="paw"
                     size={23}
-                    color="#FFFFFF"
+                    color={C.branco}
                   />
                 </View>
 
@@ -319,6 +386,7 @@ export default function Home({
                       Match
                     </Text>
                   </Text>
+
                   <Text style={css.logoDescricao}>
                     Conectando pets a novos lares
                   </Text>
@@ -358,14 +426,15 @@ export default function Home({
                 />
 
                 <Pressable
-                  onPress={sair}
                   style={css.botaoSair}
+                  onPress={sair}
                 >
                   <Ionicons
                     name="log-out-outline"
                     size={17}
                     color={C.secundario}
                   />
+
                   <Text style={css.botaoSairTexto}>
                     Sair
                   </Text>
@@ -387,7 +456,7 @@ export default function Home({
 
         {aba === 'Inicio' && (
           <>
-            {/* HERO */}
+            {/* APRESENTAÇÃO PRINCIPAL */}
             <View style={css.largura}>
               <View
                 style={[
@@ -402,6 +471,7 @@ export default function Home({
                       size={14}
                       color={C.verde}
                     />
+
                     <Text style={css.etiquetaTexto}>
                       ADOÇÃO RESPONSÁVEL
                     </Text>
@@ -437,10 +507,11 @@ export default function Home({
                     <Text style={css.botaoVerdeTexto}>
                       Ver todos os animais
                     </Text>
+
                     <Ionicons
                       name="arrow-forward"
                       size={17}
-                      color="#FFFFFF"
+                      color={C.branco}
                     />
                   </Pressable>
                 </View>
@@ -455,19 +526,16 @@ export default function Home({
               </View>
             </View>
 
-            {/* BUSCA */}
+            {/* BUSCA E FILTROS */}
             <View style={css.largura}>
               <View style={css.buscaCartao}>
-                <View style={css.buscaTituloLinha}>
-                  <View>
-                    <Text style={css.buscaTitulo}>
-                      Encontre seu novo amigo
-                    </Text>
-                    <Text style={css.buscaDescricao}>
-                      Pesquise pelo nome, raça ou cidade.
-                    </Text>
-                  </View>
-                </View>
+                <Text style={css.buscaTitulo}>
+                  Encontre seu novo amigo
+                </Text>
+
+                <Text style={css.buscaDescricao}>
+                  Pesquise pelo nome, raça ou cidade.
+                </Text>
 
                 <View
                   style={[
@@ -481,6 +549,7 @@ export default function Home({
                       size={19}
                       color={C.secundario}
                     />
+
                     <TextInput
                       value={busca}
                       onChangeText={setBusca}
@@ -527,9 +596,11 @@ export default function Home({
                     <Text style={css.secaoEtiqueta}>
                       CONHEÇA QUEM ESTÁ ESPERANDO
                     </Text>
+
                     <Text style={css.secaoTitulo}>
                       Animais para adoção
                     </Text>
+
                     <Text style={css.secaoDescricao}>
                       Talvez seu próximo companheiro
                       esteja aqui.
@@ -543,6 +614,7 @@ export default function Home({
                     <Text style={css.linkVerTodosTexto}>
                       Ver todos
                     </Text>
+
                     <Ionicons
                       name="arrow-forward"
                       size={17}
@@ -557,6 +629,7 @@ export default function Home({
                       color={C.laranja}
                       size="large"
                     />
+
                     <Text style={css.estadoTexto}>
                       Carregando animais...
                     </Text>
@@ -568,9 +641,11 @@ export default function Home({
                       size={35}
                       color={C.verde}
                     />
+
                     <Text style={css.estadoTitulo}>
                       Nenhum animal encontrado
                     </Text>
+
                     <Text style={css.estadoTexto}>
                       {busca || tipo !== 'Todos'
                         ? 'Tente mudar os filtros da pesquisa.'
@@ -580,14 +655,16 @@ export default function Home({
                 ) : (
                   <View style={css.grade}>
                     {destaques.map((animal) => {
+                      const id = idAnimal(animal);
                       const imagem = fotoAnimal(animal);
+
                       const favorito = favoritos.includes(
-                        String(animal.id)
+                        String(id)
                       );
 
                       return (
                         <View
-                          key={String(animal.id)}
+                          key={String(id)}
                           style={[
                             css.cartaoAnimal,
                             {
@@ -610,17 +687,14 @@ export default function Home({
                                   resizeMode="cover"
                                 />
                               ) : (
-                                <View
-                                  style={css.semFoto}
-                                >
+                                <View style={css.semFoto}>
                                   <Ionicons
                                     name="paw-outline"
                                     size={42}
                                     color="#B9C7AC"
                                   />
-                                  <Text
-                                    style={css.semFotoTexto}
-                                  >
+
+                                  <Text style={css.semFotoTexto}>
                                     Sem foto
                                   </Text>
                                 </View>
@@ -678,6 +752,7 @@ export default function Home({
                               >
                                 Conhecer
                               </Text>
+
                               <Ionicons
                                 name="arrow-forward"
                                 size={16}
@@ -693,16 +768,18 @@ export default function Home({
               </View>
             </View>
 
-            {/* SOBRE O PROJETO */}
+            {/* SOBRE O PETMATCH */}
             <View style={css.secaoSobre}>
               <View style={css.largura}>
                 <View style={css.sobreInterno}>
                   <Text style={css.secaoEtiqueta}>
                     SOBRE O PETMATCH
                   </Text>
+
                   <Text style={css.secaoTitulo}>
                     Uma conexão que muda vidas
                   </Text>
+
                   <Text style={css.sobreDescricao}>
                     O PetMatch foi criado para facilitar
                     o encontro entre pessoas interessadas
@@ -711,37 +788,27 @@ export default function Home({
                   </Text>
 
                   <View style={css.passos}>
-                    {[
-                      {
-                        icone: 'search-outline',
-                        titulo: 'Encontre',
-                        texto: 'Conheça os animais disponíveis para adoção.',
-                      },
-                      {
-                        icone: 'bookmark-outline',
-                        titulo: 'Favorite',
-                        texto: 'Salve os animais que chamaram sua atenção.',
-                      },
-                      {
-                        icone: 'home-outline',
-                        titulo: 'Adote',
-                        texto: 'Entre com uma solicitação de adoção.',
-                      },
-                    ].map((passo) => (
+                    {passos.map((passo) => (
                       <View
                         key={passo.titulo}
                         style={css.passo}
                       >
-                        <View style={css.passoIcone}>
-                          <Ionicons
-                            name={passo.icone}
-                            size={23}
-                            color={C.verde}
-                          />
-                        </View>
+                        <Ionicons
+  name={
+    passo.icone === 'search-outline'
+      ? 'search-outline'
+      : passo.icone === 'heart-outline'
+        ? 'heart-outline'
+        : 'home-outline'
+  }
+  size={23}
+  color={C.verde}
+/>
+
                         <Text style={css.passoTitulo}>
                           {passo.titulo}
                         </Text>
+
                         <Text style={css.passoTexto}>
                           {passo.texto}
                         </Text>
@@ -751,171 +818,78 @@ export default function Home({
                 </View>
               </View>
             </View>
-
-            {/* GERENCIAMENTO */}
-            {podeGerenciar && (
-              <View style={css.largura}>
-                <View style={css.gerenciamento}>
-                  <View style={css.gerenciamentoTexto}>
-                    <Text style={css.secaoEtiqueta}>
-                      ÁREA DE GERENCIAMENTO
-                    </Text>
-                    <Text style={css.gerenciamentoTitulo}>
-                      Gerencie os animais cadastrados
-                    </Text>
-                    <Text style={css.gerenciamentoDescricao}>
-                      Adicione novos animais e mantenha
-                      os anúncios atualizados.
-                    </Text>
-                  </View>
-
-                  <View style={css.gerenciamentoBotoes}>
-                    <Pressable
-                      style={css.botaoLaranja}
-                      onPress={() =>
-                        navigation.navigate(
-                          'CadastrarAnimal'
-                        )
-                      }
-                    >
-                      <Ionicons
-                        name="add"
-                        size={18}
-                        color="#FFFFFF"
-                      />
-                      <Text style={css.botaoLaranjaTexto}>
-                        Cadastrar animal
-                      </Text>
-                    </Pressable>
-
-                    {admin && (
-                      <Pressable
-                        style={css.botaoContorno}
-                        onPress={() =>
-                          navigation.navigate('Usuarios')
-                        }
-                      >
-                        <Ionicons
-                          name="people-outline"
-                          size={17}
-                          color={C.laranja}
-                        />
-                        <Text
-                          style={css.botaoContornoTexto}
-                        >
-                          Gerenciar usuários
-                        </Text>
-                      </Pressable>
-                    )}
-                  </View>
-                </View>
-              </View>
-            )}
           </>
         )}
 
+        {/* PÁGINA SOBRE */}
         {aba === 'Sobre' && (
           <View style={css.largura}>
             <View style={css.paginaInterna}>
               <Text style={css.secaoEtiqueta}>
                 CONHEÇA O PETMATCH
               </Text>
+
               <Text style={css.secaoTitulo}>
                 Sobre o projeto
               </Text>
+
               <Text style={css.sobreDescricao}>
                 O PetMatch busca facilitar a adoção
                 responsável de cães e gatos, aproximando
-                pessoas interessadas em adotar de ONGs e
-                protetores independentes.
+                pessoas interessadas em adotar de ONGs
+                e protetores independentes.
               </Text>
 
               <View style={css.passos}>
-                {[
-                  {
-                    icone: 'search-outline',
-                    titulo: 'Encontre',
-                    texto: 'Explore os animais cadastrados na plataforma.',
-                  },
-                  {
-                    icone: 'bookmark-outline',
-                    titulo: 'Favorite',
-                    texto: 'Guarde seus animais preferidos para consultar depois.',
-                  },
-                  {
-                    icone: 'home-outline',
-                    titulo: 'Solicite a adoção',
-                    texto: 'Preencha uma solicitação para iniciar o processo.',
-                  },
-                ].map((item) => (
+                {passos.map((passo) => (
                   <View
-                    key={item.titulo}
+                    key={passo.titulo}
                     style={css.passo}
                   >
-                    <View style={css.passoIcone}>
-                      <Ionicons
-                        name={item.icone}
-                        size={24}
-                        color={C.verde}
-                      />
-                    </View>
+                    <Ionicons
+  name={
+    passo.icone === 'search-outline'
+      ? 'search-outline'
+      : passo.icone === 'heart-outline'
+        ? 'heart-outline'
+        : 'home-outline'
+  }
+  size={23}
+  color={C.verde}
+/>
+
                     <Text style={css.passoTitulo}>
-                      {item.titulo}
+                      {passo.titulo}
                     </Text>
+
                     <Text style={css.passoTexto}>
-                      {item.texto}
+                      {passo.texto}
                     </Text>
                   </View>
                 ))}
               </View>
-
-              <Pressable
-                style={[
-                  css.botaoVerde,
-                  { alignSelf: 'flex-start', marginTop: 28 },
-                ]}
-                onPress={abrirAnimais}
-              >
-                <Text style={css.botaoVerdeTexto}>
-                  Conhecer os animais
-                </Text>
-              </Pressable>
             </View>
           </View>
         )}
 
+        {/* PÁGINA CONTATO */}
         {aba === 'Contato' && (
           <View style={css.largura}>
             <View style={css.paginaInterna}>
               <Text style={css.secaoEtiqueta}>
                 ENTRE EM CONTATO
               </Text>
+
               <Text style={css.secaoTitulo}>
                 Fale com o PetMatch
               </Text>
+
               <Text style={css.sobreDescricao}>
                 Precisa de informações sobre um animal
-                ou sobre o processo de adoção? Acesse o
-                perfil do animal para consultar os dados
-                disponíveis e iniciar uma solicitação.
-              </Text>
-
-              <Pressable
-                style={[
-                  css.botaoVerde,
-                  { alignSelf: 'flex-start', marginTop: 25 },
-                ]}
-                onPress={abrirAnimais}
-              >
-                <Text style={css.botaoVerdeTexto}>
-                  Ver animais disponíveis
-                </Text>
-              </Pressable>
-
-              <Text style={css.contatoNota}>
-                O formulário de contato será conectado
-                quando configurarmos o serviço de
-                recebimento de mensagens.
+                ou sobre o processo de adoção? Acesse
+                o perfil do animal para consultar os
+                dados disponíveis e iniciar uma
+                solicitação.
               </Text>
             </View>
           </View>
@@ -926,8 +900,12 @@ export default function Home({
           <View style={css.largura}>
             <View style={css.rodapeInterno}>
               <Text style={css.rodapeMarca}>
-                Pet<Text style={css.logoLaranja}>Match</Text>
+                Pet
+                <Text style={css.logoLaranja}>
+                  Match
+                </Text>
               </Text>
+
               <Text style={css.rodapeTexto}>
                 Conectando pets a novos lares.
               </Text>
@@ -944,9 +922,11 @@ const css = StyleSheet.create({
     flex: 1,
     backgroundColor: C.fundo,
   },
+
   scroll: {
     flexGrow: 1,
   },
+
   largura: {
     width: '100%',
     maxWidth: 1140,
@@ -959,6 +939,7 @@ const css = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: C.borda,
   },
+
   cabecalhoInterno: {
     minHeight: 76,
     flexDirection: 'row',
@@ -966,16 +947,19 @@ const css = StyleSheet.create({
     justifyContent: 'space-between',
     gap: 18,
   },
+
   cabecalhoMobile: {
     flexWrap: 'wrap',
     paddingVertical: 14,
     gap: 12,
   },
+
   marca: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
   },
+
   logoIcone: {
     width: 39,
     height: 39,
@@ -984,30 +968,36 @@ const css = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+
   logoNome: {
     fontSize: 23,
     fontWeight: '900',
     color: C.texto,
     letterSpacing: -0.7,
   },
+
   logoLaranja: {
     color: C.laranja,
   },
+
   logoDescricao: {
     fontSize: 10,
     color: C.secundario,
   },
+
   menu: {
     flexDirection: 'row',
     alignItems: 'center',
     flexWrap: 'wrap',
     gap: 5,
   },
+
   menuConta: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
   },
+
   menuBotao: {
     paddingVertical: 9,
     paddingHorizontal: 11,
@@ -1016,23 +1006,28 @@ const css = StyleSheet.create({
     alignItems: 'center',
     gap: 6,
   },
+
   menuBotaoAtivo: {
     backgroundColor: '#FFF2E9',
   },
+
   menuTexto: {
     fontSize: 13,
     fontWeight: '600',
     color: C.texto,
   },
+
   menuTextoAtivo: {
     color: C.laranja,
   },
+
   botaoSair: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 5,
     padding: 8,
   },
+
   botaoSairTexto: {
     fontSize: 12,
     color: C.secundario,
@@ -1044,6 +1039,7 @@ const css = StyleSheet.create({
     borderRadius: 10,
     marginTop: 16,
   },
+
   avisoTexto: {
     color: '#A14D20',
     fontSize: 12,
@@ -1057,15 +1053,18 @@ const css = StyleSheet.create({
     marginTop: 30,
     minHeight: 340,
   },
+
   heroMobile: {
     flexDirection: 'column',
   },
+
   heroConteudo: {
     flex: 1,
     padding: 36,
     justifyContent: 'center',
     alignItems: 'flex-start',
   },
+
   etiqueta: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1076,12 +1075,14 @@ const css = StyleSheet.create({
     borderRadius: 30,
     marginBottom: 18,
   },
+
   etiquetaTexto: {
     fontSize: 10,
     fontWeight: '800',
     color: C.verde,
     letterSpacing: 0.4,
   },
+
   heroTitulo: {
     color: C.texto,
     fontSize: 39,
@@ -1090,13 +1091,16 @@ const css = StyleSheet.create({
     letterSpacing: -1.1,
     maxWidth: 510,
   },
+
   heroTituloMobile: {
     fontSize: 31,
     lineHeight: 38,
   },
+
   textoLaranja: {
     color: C.laranja,
   },
+
   heroDescricao: {
     color: C.texto,
     fontSize: 15,
@@ -1104,6 +1108,7 @@ const css = StyleSheet.create({
     marginTop: 15,
     maxWidth: 430,
   },
+
   heroComplemento: {
     color: C.secundario,
     fontSize: 12,
@@ -1111,6 +1116,7 @@ const css = StyleSheet.create({
     marginTop: 10,
     maxWidth: 410,
   },
+
   botaoVerde: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1118,20 +1124,23 @@ const css = StyleSheet.create({
     gap: 9,
     backgroundColor: C.verde,
     paddingHorizontal: 21,
-    height: 45,
+    minHeight: 45,
     borderRadius: 11,
     marginTop: 22,
   },
+
   botaoVerdeTexto: {
     color: C.branco,
     fontWeight: '800',
     fontSize: 13,
   },
+
   heroImagemContainer: {
     flex: 0.85,
     minHeight: 245,
     backgroundColor: '#E8E3D9',
   },
+
   heroImagem: {
     width: '100%',
     height: '100%',
@@ -1146,28 +1155,31 @@ const css = StyleSheet.create({
     borderWidth: 1,
     borderColor: C.borda,
   },
-  buscaTituloLinha: {
-    marginBottom: 17,
-  },
+
   buscaTitulo: {
     fontSize: 19,
     fontWeight: '800',
     color: C.texto,
   },
+
   buscaDescricao: {
     fontSize: 12,
     color: C.secundario,
     marginTop: 5,
+    marginBottom: 17,
   },
+
   buscaLinha: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 15,
   },
+
   buscaLinhaMobile: {
     flexDirection: 'column',
     alignItems: 'stretch',
   },
+
   campoBusca: {
     flex: 1,
     minHeight: 45,
@@ -1179,6 +1191,7 @@ const css = StyleSheet.create({
     paddingHorizontal: 13,
     gap: 9,
   },
+
   inputBusca: {
     flex: 1,
     minWidth: 0,
@@ -1186,11 +1199,13 @@ const css = StyleSheet.create({
     color: C.texto,
     paddingVertical: 10,
   },
+
   filtros: {
     flexDirection: 'row',
     gap: 7,
     flexWrap: 'wrap',
   },
+
   filtro: {
     paddingVertical: 12,
     paddingHorizontal: 14,
@@ -1199,15 +1214,18 @@ const css = StyleSheet.create({
     borderWidth: 1,
     borderColor: C.borda,
   },
+
   filtroAtivo: {
     backgroundColor: C.laranja,
     borderColor: C.laranja,
   },
+
   filtroTexto: {
     color: C.texto,
     fontSize: 12,
     fontWeight: '700',
   },
+
   filtroTextoAtivo: {
     color: C.branco,
   },
@@ -1215,6 +1233,7 @@ const css = StyleSheet.create({
   secao: {
     paddingVertical: 45,
   },
+
   secaoCabecalho: {
     flexDirection: 'row',
     alignItems: 'flex-end',
@@ -1223,9 +1242,11 @@ const css = StyleSheet.create({
     gap: 15,
     marginBottom: 23,
   },
+
   secaoTexto: {
     flex: 1,
   },
+
   secaoEtiqueta: {
     fontSize: 10,
     fontWeight: '800',
@@ -1233,23 +1254,27 @@ const css = StyleSheet.create({
     color: C.verde,
     marginBottom: 10,
   },
+
   secaoTitulo: {
     color: C.texto,
     fontSize: 27,
     fontWeight: '900',
     letterSpacing: -0.6,
   },
+
   secaoDescricao: {
     color: C.secundario,
     fontSize: 13,
     marginTop: 8,
   },
+
   linkVerTodos: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 7,
     paddingVertical: 8,
   },
+
   linkVerTodosTexto: {
     color: C.laranja,
     fontWeight: '800',
@@ -1261,6 +1286,7 @@ const css = StyleSheet.create({
     flexWrap: 'wrap',
     gap: 18,
   },
+
   cartaoAnimal: {
     backgroundColor: C.branco,
     borderRadius: 17,
@@ -1270,24 +1296,29 @@ const css = StyleSheet.create({
     position: 'relative',
     marginBottom: 8,
   },
+
   imagemAnimal: {
     height: 190,
     backgroundColor: '#EEF0E9',
   },
+
   fotoAnimal: {
     width: '100%',
     height: '100%',
   },
+
   semFoto: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
     gap: 8,
   },
+
   semFotoTexto: {
     color: C.secundario,
     fontSize: 12,
   },
+
   favoritar: {
     position: 'absolute',
     top: 12,
@@ -1299,14 +1330,17 @@ const css = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+
   animalConteudo: {
     padding: 16,
   },
+
   animalNome: {
     fontSize: 18,
     fontWeight: '800',
     color: C.texto,
   },
+
   animalDescricao: {
     fontSize: 12,
     color: C.secundario,
@@ -1314,6 +1348,7 @@ const css = StyleSheet.create({
     lineHeight: 19,
     minHeight: 20,
   },
+
   botaoDetalhes: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1323,6 +1358,7 @@ const css = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: C.borda,
   },
+
   botaoDetalhesTexto: {
     color: C.laranja,
     fontSize: 13,
@@ -1339,11 +1375,13 @@ const css = StyleSheet.create({
     borderWidth: 1,
     borderColor: C.borda,
   },
+
   estadoTitulo: {
     fontSize: 17,
     fontWeight: '800',
     color: C.texto,
   },
+
   estadoTexto: {
     color: C.secundario,
     fontSize: 13,
@@ -1354,9 +1392,11 @@ const css = StyleSheet.create({
     backgroundColor: '#F0F4EA',
     paddingVertical: 45,
   },
+
   sobreInterno: {
     alignItems: 'center',
   },
+
   sobreDescricao: {
     color: C.secundario,
     fontSize: 14,
@@ -1365,6 +1405,7 @@ const css = StyleSheet.create({
     textAlign: 'center',
     marginTop: 13,
   },
+
   passos: {
     width: '100%',
     flexDirection: 'row',
@@ -1373,6 +1414,7 @@ const css = StyleSheet.create({
     gap: 16,
     marginTop: 28,
   },
+
   passo: {
     flexGrow: 1,
     flexBasis: 210,
@@ -1384,6 +1426,7 @@ const css = StyleSheet.create({
     borderColor: '#E4E9DE',
     alignItems: 'center',
   },
+
   passoIcone: {
     width: 48,
     height: 48,
@@ -1393,79 +1436,19 @@ const css = StyleSheet.create({
     justifyContent: 'center',
     marginBottom: 13,
   },
+
   passoTitulo: {
     fontSize: 16,
     fontWeight: '800',
     color: C.texto,
   },
+
   passoTexto: {
     fontSize: 12,
     lineHeight: 19,
     color: C.secundario,
     textAlign: 'center',
     marginTop: 8,
-  },
-
-  gerenciamento: {
-    backgroundColor: C.branco,
-    borderWidth: 1,
-    borderColor: C.borda,
-    borderRadius: 17,
-    padding: 25,
-    marginVertical: 30,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    flexWrap: 'wrap',
-    gap: 18,
-  },
-  gerenciamentoTexto: {
-    flex: 1,
-    minWidth: 220,
-  },
-  gerenciamentoTitulo: {
-    fontSize: 19,
-    fontWeight: '800',
-    color: C.texto,
-  },
-  gerenciamentoDescricao: {
-    fontSize: 12,
-    color: C.secundario,
-    marginTop: 8,
-  },
-  gerenciamentoBotoes: {
-    gap: 9,
-  },
-  botaoLaranja: {
-    height: 43,
-    paddingHorizontal: 17,
-    borderRadius: 10,
-    backgroundColor: C.laranja,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 7,
-  },
-  botaoLaranjaTexto: {
-    color: C.branco,
-    fontSize: 12,
-    fontWeight: '800',
-  },
-  botaoContorno: {
-    height: 43,
-    paddingHorizontal: 17,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: C.laranja,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 7,
-  },
-  botaoContornoTexto: {
-    color: C.laranja,
-    fontSize: 12,
-    fontWeight: '800',
   },
 
   paginaInterna: {
@@ -1478,12 +1461,6 @@ const css = StyleSheet.create({
     borderColor: C.borda,
     minHeight: 300,
   },
-  contatoNota: {
-    fontSize: 12,
-    color: C.secundario,
-    textAlign: 'center',
-    marginTop: 25,
-  },
 
   rodape: {
     backgroundColor: C.branco,
@@ -1491,16 +1468,19 @@ const css = StyleSheet.create({
     borderTopColor: C.borda,
     marginTop: 20,
   },
+
   rodapeInterno: {
     paddingVertical: 25,
     alignItems: 'center',
     gap: 5,
   },
+
   rodapeMarca: {
     fontSize: 18,
     fontWeight: '900',
     color: C.texto,
   },
+
   rodapeTexto: {
     fontSize: 11,
     color: C.secundario,

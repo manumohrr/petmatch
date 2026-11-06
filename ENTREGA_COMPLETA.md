@@ -1,9 +1,9 @@
-# LOJA JWT — entrega completa
+# PetMatch — entrega completa
 
 ## 1. Estrutura completa de pastas e arquivos
 
 ```text
-loja-jwt/
+petmatch/
 ├── assets/
 │   ├── android-icon-background.png
 │   ├── android-icon-foreground.png
@@ -15,8 +15,10 @@ loja-jwt/
 │   ├── config/
 │   │   └── ambiente.js
 │   ├── controllers/
+│   │   ├── adocoesController.js
+│   │   ├── animaisController.js
 │   │   ├── authController.js
-│   │   ├── produtosController.js
+│   │   ├── favoritosController.js
 │   │   └── usuariosController.js
 │   ├── database/
 │   │   └── conexao.js
@@ -24,8 +26,10 @@ loja-jwt/
 │   │   ├── autenticarToken.js
 │   │   └── somenteAdmin.js
 │   ├── routes/
+│   │   ├── adocoesRoutes.js
+│   │   ├── animaisRoutes.js
 │   │   ├── authRoutes.js
-│   │   ├── produtosRoutes.js
+│   │   ├── favoritosRoutes.js
 │   │   └── usuariosRoutes.js
 │   ├── scripts/
 │   │   └── criarAdmin.js
@@ -34,22 +38,25 @@ loja-jwt/
 │   │   └── mysql.integration.test.js
 │   ├── utils/
 │   │   └── validacoes.js
-│   ├── .env.example
 │   ├── app.js
 │   └── server.js
 ├── components/
-│   ├── FormularioProduto.js
+│   ├── FormularioAnimal.js
 │   └── ui.js
 ├── database/
-│   └── loja_jwt.sql
+│   └── petmatch.sql
 ├── screens/
-│   ├── CadastrarProduto.js
+│   ├── Animais.js
+│   ├── CadastrarAnimal.js
 │   ├── CadastroUsuario.js
-│   ├── DetalhesProduto.js
-│   ├── EditarProduto.js
+│   ├── DetalhesAnimal.js
+│   ├── EditarAnimal.js
+│   ├── Favoritos.js
 │   ├── Home.js
 │   ├── Login.js
-│   ├── Produtos.js
+│   ├── MinhasSolicitacoes.js
+│   ├── Perfil.js
+│   ├── SolicitarAdocao.js
 │   └── Usuarios.js
 ├── scripts/
 │   ├── gerar-entrega.js
@@ -81,8 +88,8 @@ A árvore lista os fontes e os assets originais. Imagens são entregues nos arqu
 Para criar um projeto novo durante a construção em aula:
 
 ```bash
-npx create-expo-app@latest loja-jwt --template blank
-cd loja-jwt
+npx create-expo-app@latest petmatch --template blank
+cd petmatch
 npm install @react-navigation/native
 npm install @react-navigation/native-stack
 npx expo install react-native-screens react-native-safe-area-context
@@ -94,19 +101,15 @@ npm install express mysql2 cors jsonwebtoken bcryptjs dotenv
 Para executar os arquivos já entregues, entre na pasta e instale as versões do lock:
 
 ```bash
-cd loja-jwt
+cd petmatch
 npm ci
 ```
 
-Execute `database/loja_jwt.sql` no MySQL Workbench. No PowerShell, copie o modelo local:
+Para um banco novo, use `database/petmatch.sql`. CREATE TABLE IF NOT EXISTS não migra tabelas existentes; revise uma migração antes de usar em banco com dados.
 
-```powershell
-Copy-Item -LiteralPath backend/.env.example -Destination backend/.env
-```
+A API lê a configuração local de `backend/.env`: DB_HOST, DB_PORT, DB_USER, DB_PASSWORD, DB_NAME=petmatch_db, PORT e JWT_SECRET (pelo menos 32 caracteres). Não sobrescreva um arquivo existente. Nenhum `.env` acompanha esta entrega; não há `.env.example` nesta versão.
 
-Preencha o arquivo local com suas configurações e um segredo JWT próprio. Nenhum `.env` acompanha esta entrega.
-
-O SQL insere duas contas demonstrativas: `usuario@loja.com` / `Usuario@123` (nível `usuario`) e `admin@loja.com` / `Admin@123` (nível `admin`). São senhas públicas para aula; no banco, somente hashes bcrypt com custo 10. Ao reimportar, `INSERT IGNORE` preserva contas existentes, inclusive suas senhas e níveis. As credenciais acima valem para as contas criadas pelo SQL.
+O SQL define as quatro tabelas do PetMatch e não insere contas ou senhas demonstrativas.
 
 Opcionalmente, configure `ADMIN_NOME`, `ADMIN_EMAIL` e `ADMIN_SENHA` no `.env` para criar um administrador próprio com outro e-mail. O script não altera a senha nem o nível de uma conta existente:
 
@@ -142,7 +145,7 @@ Os detalhes de ambiente, dispositivos, testes e conceitos estão no README repro
 
 ## 3. Conteúdo integral dos arquivos de texto
 
-### loja-jwt/backend/config/ambiente.js
+### petmatch/backend/config/ambiente.js
 
 ```js
 import dotenv from 'dotenv';
@@ -187,261 +190,1139 @@ export default function validarAmbiente() {
 ```
 
 
-### loja-jwt/backend/controllers/authController.js
+### petmatch/backend/controllers/adocoesController.js
 
 ```js
+
+import pool from '../database/conexao.js';
+import { idValido } from '../utils/validacoes.js';
+
+const responsavel = (usuario) =>
+  ['ong', 'protetor', 'admin'].includes(usuario?.nivel);
+
+// CREATE - SOLICITAR ADOÇÃO
+export async function solicitarAdocao(req, res) {
+  const animalId = Number(req.body.animal_id);
+  const usuarioId = req.usuario.id;
+  const mensagem =
+    typeof req.body.mensagem === 'string'
+      ? req.body.mensagem.trim()
+      : '';
+
+  if (req.usuario.nivel !== 'adotante') {
+    return res.status(403).json({
+      mensagem: 'Somente adotantes podem solicitar uma adoção.',
+    });
+  }
+
+  if (!Number.isSafeInteger(animalId) || animalId < 1) {
+    return res.status(400).json({
+      mensagem: 'Animal inválido.',
+    });
+  }
+
+  if (mensagem.length > 1000) {
+    return res.status(400).json({
+      mensagem: 'A mensagem deve ter até 1000 caracteres.',
+    });
+  }
+
+  try {
+    const [animais] = await pool.execute(
+      'SELECT id, status FROM animais WHERE id = ?',
+      [animalId]
+    );
+
+    if (animais.length === 0) {
+      return res.status(404).json({
+        mensagem: 'Animal não encontrado.',
+      });
+    }
+
+    if (animais[0].status !== 'disponivel') {
+      return res.status(400).json({
+        mensagem: 'Este animal não está disponível para adoção.',
+      });
+    }
+
+    const [existentes] = await pool.execute(
+      `SELECT id FROM adocoes
+       WHERE animal_id = ?
+       AND usuario_id = ?
+       AND status = 'pendente'`,
+      [animalId, usuarioId]
+    );
+
+    if (existentes.length > 0) {
+      return res.status(409).json({
+        mensagem: 'Você já possui uma solicitação pendente para este animal.',
+      });
+    }
+
+    const [resultado] = await pool.execute(
+      `INSERT INTO adocoes
+       (animal_id, usuario_id, mensagem, status)
+       VALUES (?, ?, ?, 'pendente')`,
+      [animalId, usuarioId, mensagem]
+    );
+
+    return res.status(201).json({
+      mensagem: 'Solicitação de adoção enviada com sucesso!',
+      adocao: {
+        id: resultado.insertId,
+        animal_id: animalId,
+        usuario_id: usuarioId,
+        mensagem,
+        status: 'pendente',
+      },
+    });
+  } catch (erro) {
+    console.error('Erro ao solicitar adoção:', erro);
+
+    return res.status(500).json({
+      mensagem: 'Não foi possível enviar a solicitação.',
+    });
+  }
+}
+
+// READ - LISTAR SOLICITAÇÕES
+export async function listarAdocoes(req, res) {
+  try {
+    const parametros = [];
+    let filtro = '';
+
+    if (req.usuario.nivel === 'adotante') {
+      filtro = 'WHERE a.usuario_id = ?';
+      parametros.push(req.usuario.id);
+    } else if (req.usuario.nivel !== 'admin') {
+      if (!responsavel(req.usuario)) {
+        return res.status(403).json({
+          mensagem: 'Acesso não permitido.',
+        });
+      }
+
+      filtro = 'WHERE an.usuario_id = ?';
+      parametros.push(req.usuario.id);
+    }
+
+    const [adocoes] = await pool.execute(
+      `SELECT
+         a.id,
+         a.animal_id,
+         a.usuario_id,
+         a.mensagem,
+         a.status,
+         a.criado_em,
+         an.nome AS nome_animal,
+         an.foto AS foto_animal,
+         u.nome AS nome_adotante
+       FROM adocoes a
+       INNER JOIN animais an ON an.id = a.animal_id
+       INNER JOIN usuarios u ON u.id = a.usuario_id
+       ${filtro}
+       ORDER BY a.criado_em DESC, a.id DESC`,
+      parametros
+    );
+
+    return res.status(200).json(adocoes);
+  } catch (erro) {
+    console.error('Erro ao listar adoções:', erro);
+
+    return res.status(500).json({
+      mensagem: 'Não foi possível listar as solicitações.',
+    });
+  }
+}
+
+// UPDATE - APROVAR OU RECUSAR SOLICITAÇÃO
+export async function atualizarStatusAdocao(req, res) {
+  if (!idValido(req.params.id)) {
+    return res.status(400).json({
+      mensagem: 'ID da solicitação inválido.',
+    });
+  }
+
+  const status = req.body.status;
+
+  if (!['aprovada', 'recusada'].includes(status)) {
+    return res.status(400).json({
+      mensagem: 'O status deve ser aprovada ou recusada.',
+    });
+  }
+
+  if (!responsavel(req.usuario)) {
+    return res.status(403).json({
+      mensagem: 'Você não tem permissão para avaliar solicitações.',
+    });
+  }
+
+  let conexao;
+
+  try {
+    conexao = await pool.getConnection();
+    await conexao.beginTransaction();
+
+    const [adocoes] = await conexao.execute(
+      `SELECT a.id, a.animal_id, a.status,
+              an.usuario_id AS responsavel_id,
+              an.status AS status_animal
+       FROM adocoes a
+       INNER JOIN animais an ON an.id = a.animal_id
+       WHERE a.id = ?
+       FOR UPDATE`,
+      [Number(req.params.id)]
+    );
+
+    const adocao = adocoes[0];
+
+    if (!adocao) {
+      await conexao.rollback();
+      return res.status(404).json({
+        mensagem: 'Solicitação não encontrada.',
+      });
+    }
+
+    if (
+      req.usuario.nivel !== 'admin' &&
+      Number(adocao.responsavel_id) !== Number(req.usuario.id)
+    ) {
+      await conexao.rollback();
+      return res.status(403).json({
+        mensagem: 'Você não é responsável por este animal.',
+      });
+    }
+
+    if (adocao.status !== 'pendente') {
+      await conexao.rollback();
+      return res.status(400).json({
+        mensagem: 'Esta solicitação já foi finalizada.',
+      });
+    }
+
+    if (status === 'aprovada' && adocao.status_animal !== 'disponivel') {
+      await conexao.rollback();
+      return res.status(409).json({
+        mensagem: 'Este animal não está mais disponível.',
+      });
+    }
+
+    await conexao.execute(
+      'UPDATE adocoes SET status = ? WHERE id = ?',
+      [status, adocao.id]
+    );
+
+    if (status === 'aprovada') {
+      await conexao.execute(
+        `UPDATE animais SET status = 'adotado' WHERE id = ?`,
+        [adocao.animal_id]
+      );
+
+      await conexao.execute(
+        `UPDATE adocoes
+         SET status = 'recusada'
+         WHERE animal_id = ?
+         AND id <> ?
+         AND status = 'pendente'`,
+        [adocao.animal_id, adocao.id]
+      );
+    }
+
+    await conexao.commit();
+
+    return res.status(200).json({
+      mensagem:
+        status === 'aprovada'
+          ? 'Adoção aprovada com sucesso!'
+          : 'Solicitação recusada.',
+    });
+  } catch (erro) {
+    if (conexao) await conexao.rollback();
+
+    console.error('Erro ao atualizar adoção:', erro);
+
+    return res.status(500).json({
+      mensagem: 'Não foi possível atualizar a solicitação.',
+    });
+  } finally {
+    if (conexao) conexao.release();
+  }
+}
+
+// DELETE - CANCELAR SOLICITAÇÃO
+export async function cancelarAdocao(req, res) {
+  if (!idValido(req.params.id)) {
+    return res.status(400).json({
+      mensagem: 'ID da solicitação inválido.',
+    });
+  }
+
+  try {
+    const [resultado] = await pool.execute(
+      `UPDATE adocoes
+       SET status = 'cancelada'
+       WHERE id = ?
+       AND usuario_id = ?
+       AND status = 'pendente'`,
+      [Number(req.params.id), req.usuario.id]
+    );
+
+    if (resultado.affectedRows === 0) {
+      return res.status(404).json({
+        mensagem: 'Solicitação pendente não encontrada.',
+      });
+    }
+
+    return res.status(200).json({
+      mensagem: 'Solicitação cancelada com sucesso.',
+    });
+  } catch (erro) {
+    console.error('Erro ao cancelar adoção:', erro);
+
+    return res.status(500).json({
+      mensagem: 'Não foi possível cancelar a solicitação.',
+    });
+  }
+}
+```
+
+
+### petmatch/backend/controllers/animaisController.js
+
+```js
+
+import pool from '../database/conexao.js';
+
+// VALIDAR O ID RECEBIDO NA URL
+function validarId(valor) {
+  const id = Number(valor);
+
+  if (!Number.isSafeInteger(id) || id <= 0) {
+    return null;
+  }
+
+  return id;
+}
+
+// VALIDAR E PREPARAR OS DADOS DO ANIMAL
+function prepararDadosAnimal(body) {
+  const nome = String(body.nome || '').trim();
+  const especie = String(body.especie || '').trim();
+  const raca = String(body.raca || '').trim();
+  const idade = Number(body.idade);
+  const unidade_idade = String(body.unidade_idade || '').trim();
+  const porte = String(body.porte || '').trim();
+  const sexo = String(body.sexo || '').trim();
+  const cidade = String(body.cidade || '').trim();
+  const descricao = String(body.descricao || '').trim();
+  const saude = String(body.saude || '').trim();
+  const foto = String(body.foto || '').trim();
+  const status = String(body.status || 'disponivel').trim();
+
+  if (!nome || nome.length > 120) {
+    throw new Error('Informe um nome com até 120 caracteres.');
+  }
+
+  if (!['Cachorro', 'Gato'].includes(especie)) {
+    throw new Error('A espécie deve ser Cachorro ou Gato.');
+  }
+
+  if (raca.length > 100) {
+    throw new Error('A raça deve ter até 100 caracteres.');
+  }
+
+  if (
+    !Number.isInteger(idade) ||
+    idade < 0 ||
+    idade > 300
+  ) {
+    throw new Error('Informe uma idade válida.');
+  }
+
+  if (!['anos', 'meses'].includes(unidade_idade)) {
+    throw new Error('A unidade da idade deve ser anos ou meses.');
+  }
+
+  if (!['Pequeno', 'Médio', 'Grande'].includes(porte)) {
+    throw new Error('Informe um porte válido.');
+  }
+
+  if (!['Macho', 'Fêmea'].includes(sexo)) {
+    throw new Error('Informe um sexo válido.');
+  }
+
+  if (!cidade || cidade.length > 120) {
+    throw new Error('Informe uma cidade válida.');
+  }
+
+  if (descricao.length > 1000) {
+    throw new Error('A descrição deve ter até 1000 caracteres.');
+  }
+
+  if (saude.length > 500) {
+    throw new Error('As informações de saúde devem ter até 500 caracteres.');
+  }
+
+  if (foto.length > 1000) {
+    throw new Error('O link da foto deve ter até 1000 caracteres.');
+  }
+
+  if (foto && !/^https?:\/\/\S+$/i.test(foto)) {
+    throw new Error('Informe um link válido para a foto.');
+  }
+
+  if (!['disponivel', 'em_processo', 'adotado'].includes(status)) {
+    throw new Error('Informe um status válido.');
+  }
+
+  return {
+    nome,
+    especie,
+    raca,
+    idade,
+    unidade_idade,
+    porte,
+    sexo,
+    cidade,
+    descricao,
+    saude,
+    foto,
+    status,
+  };
+}
+
+// VERIFICAR SE O USUÁRIO PODE ALTERAR O ANIMAL
+function podeAlterarAnimal(usuario, animal) {
+  if (usuario.nivel === 'admin') {
+    return true;
+  }
+
+  return (
+    ['ong', 'protetor'].includes(usuario.nivel) &&
+    Number(animal.usuario_id) === Number(usuario.id)
+  );
+}
+
+// READ - LISTAR ANIMAIS
+export async function listarAnimais(req, res) {
+  try {
+    const [animais] = await pool.execute(
+      `SELECT
+        id,
+        usuario_id,
+        nome,
+        especie,
+        raca,
+        idade,
+        unidade_idade,
+        porte,
+        sexo,
+        cidade,
+        descricao,
+        saude,
+        foto,
+        status
+       FROM animais
+       ORDER BY id DESC`
+    );
+
+    return res.status(200).json(animais);
+  } catch (erro) {
+    console.error('Erro ao listar animais:', erro);
+
+    return res.status(500).json({
+      mensagem: 'Não foi possível carregar os animais.',
+    });
+  }
+}
+
+// READ - BUSCAR ANIMAL POR ID
+export async function buscarAnimalPorId(req, res) {
+  const id = validarId(req.params.id);
+
+  if (!id) {
+    return res.status(400).json({
+      mensagem: 'ID do animal inválido.',
+    });
+  }
+
+  try {
+    const [animais] = await pool.execute(
+      'SELECT * FROM animais WHERE id = ?',
+      [id]
+    );
+
+    if (animais.length === 0) {
+      return res.status(404).json({
+        mensagem: 'Animal não encontrado.',
+      });
+    }
+
+    return res.status(200).json(animais[0]);
+  } catch (erro) {
+    console.error('Erro ao buscar animal:', erro);
+
+    return res.status(500).json({
+      mensagem: 'Não foi possível carregar o animal.',
+    });
+  }
+}
+
+// CREATE - CADASTRAR ANIMAL
+export async function cadastrarAnimal(req, res) {
+  let animal;
+
+  try {
+    animal = prepararDadosAnimal(req.body);
+  } catch (erro) {
+    return res.status(400).json({
+      mensagem: erro.message,
+    });
+  }
+
+  try {
+    // O RESPONSÁVEL É DEFINIDO PELO TOKEN JWT
+    // NUNCA PELO ID ENVIADO NO FORMULÁRIO
+    const usuarioId = req.usuario.id;
+
+    const [resultado] = await pool.execute(
+      `INSERT INTO animais (
+        usuario_id,
+        nome,
+        especie,
+        raca,
+        idade,
+        unidade_idade,
+        porte,
+        sexo,
+        cidade,
+        descricao,
+        saude,
+        foto,
+        status
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        usuarioId,
+        animal.nome,
+        animal.especie,
+        animal.raca,
+        animal.idade,
+        animal.unidade_idade,
+        animal.porte,
+        animal.sexo,
+        animal.cidade,
+        animal.descricao,
+        animal.saude,
+        animal.foto,
+        animal.status,
+      ]
+    );
+
+    return res.status(201).json({
+      mensagem: 'Animal cadastrado com sucesso!',
+      animal: {
+        id: resultado.insertId,
+        usuario_id: usuarioId,
+        ...animal,
+      },
+    });
+  } catch (erro) {
+    console.error('Erro ao cadastrar animal:', erro);
+
+    return res.status(500).json({
+      mensagem: 'Não foi possível cadastrar o animal.',
+    });
+  }
+}
+
+// UPDATE - ATUALIZAR ANIMAL
+export async function atualizarAnimal(req, res) {
+  const id = validarId(req.params.id);
+
+  if (!id) {
+    return res.status(400).json({
+      mensagem: 'ID do animal inválido.',
+    });
+  }
+
+  let dados;
+
+  try {
+    dados = prepararDadosAnimal(req.body);
+  } catch (erro) {
+    return res.status(400).json({
+      mensagem: erro.message,
+    });
+  }
+
+  try {
+    const [animais] = await pool.execute(
+      'SELECT id, usuario_id FROM animais WHERE id = ?',
+      [id]
+    );
+
+    if (animais.length === 0) {
+      return res.status(404).json({
+        mensagem: 'Animal não encontrado.',
+      });
+    }
+
+    if (!podeAlterarAnimal(req.usuario, animais[0])) {
+      return res.status(403).json({
+        mensagem: 'Você não tem permissão para editar este animal.',
+      });
+    }
+
+    await pool.execute(
+      `UPDATE animais SET
+        nome = ?,
+        especie = ?,
+        raca = ?,
+        idade = ?,
+        unidade_idade = ?,
+        porte = ?,
+        sexo = ?,
+        cidade = ?,
+        descricao = ?,
+        saude = ?,
+        foto = ?,
+        status = ?
+       WHERE id = ?`,
+      [
+        dados.nome,
+        dados.especie,
+        dados.raca,
+        dados.idade,
+        dados.unidade_idade,
+        dados.porte,
+        dados.sexo,
+        dados.cidade,
+        dados.descricao,
+        dados.saude,
+        dados.foto,
+        dados.status,
+        id,
+      ]
+    );
+
+    return res.status(200).json({
+      mensagem: 'Animal atualizado com sucesso!',
+    });
+  } catch (erro) {
+    console.error('Erro ao atualizar animal:', erro);
+
+    return res.status(500).json({
+      mensagem: 'Não foi possível atualizar o animal.',
+    });
+  }
+}
+
+// DELETE - EXCLUIR ANIMAL
+export async function excluirAnimal(req, res) {
+  const id = validarId(req.params.id);
+
+  if (!id) {
+    return res.status(400).json({
+      mensagem: 'ID do animal inválido.',
+    });
+  }
+
+  try {
+    const [animais] = await pool.execute(
+      'SELECT id, usuario_id FROM animais WHERE id = ?',
+      [id]
+    );
+
+    if (animais.length === 0) {
+      return res.status(404).json({
+        mensagem: 'Animal não encontrado.',
+      });
+    }
+
+    if (!podeAlterarAnimal(req.usuario, animais[0])) {
+      return res.status(403).json({
+        mensagem: 'Você não tem permissão para excluir este animal.',
+      });
+    }
+
+    await pool.execute(
+      'DELETE FROM animais WHERE id = ?',
+      [id]
+    );
+
+    return res.status(200).json({
+      mensagem: 'Animal excluído com sucesso!',
+    });
+  } catch (erro) {
+    console.error('Erro ao excluir animal:', erro);
+
+    if (erro.code === 'ER_ROW_IS_REFERENCED_2') {
+      return res.status(409).json({
+        mensagem:
+          'Este animal possui registros vinculados e não pode ser excluído.',
+      });
+    }
+
+    return res.status(500).json({
+      mensagem: 'Não foi possível excluir o animal.',
+    });
+  }
+}
+```
+
+
+### petmatch/backend/controllers/authController.js
+
+```js
+
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import pool from '../database/conexao.js';
 import { emailValido, senhaValida } from '../utils/validacoes.js';
 
+// CADASTRAR NOVO USUÁRIO
 export async function cadastrar(req, res) {
-  // req.body contém dados externos. Extraímos apenas os campos permitidos.
-  const nome = typeof req.body.nome === 'string' ? req.body.nome.trim() : '';
-  const email = typeof req.body.email === 'string' ? req.body.email.trim().toLowerCase() : '';
+  const nome =
+    typeof req.body.nome === 'string'
+      ? req.body.nome.trim()
+      : '';
+
+  const email =
+    typeof req.body.email === 'string'
+      ? req.body.email.trim().toLowerCase()
+      : '';
+
   const senha = req.body.senha;
 
-  if (!nome || nome.length > 100 || !emailValido(email) || !senhaValida(senha)) {
-    return res.status(400).json({ mensagem: 'Informe nome (até 100 caracteres), e-mail válido e senha com pelo menos 8 caracteres e até 72 bytes.' });
+  // VALIDAR OS DADOS
+  if (
+    !nome ||
+    nome.length > 100 ||
+    !emailValido(email) ||
+    !senhaValida(senha)
+  ) {
+    return res.status(400).json({
+      mensagem:
+        'Informe nome (até 100 caracteres), e-mail válido e senha com pelo menos 8 caracteres e até 72 bytes.',
+    });
   }
 
   try {
-    const [existentes] = await pool.execute('SELECT id FROM usuarios WHERE email = ?', [email]);
+    // VERIFICAR SE O E-MAIL JÁ ESTÁ CADASTRADO
+    const [existentes] = await pool.execute(
+      'SELECT id FROM usuarios WHERE email = ?',
+      [email]
+    );
+
     if (existentes.length > 0) {
-      return res.status(409).json({ mensagem: 'E-mail já cadastrado.' });
+      return res.status(409).json({
+        mensagem: 'E-mail já cadastrado.',
+      });
     }
 
-    // A senha original nunca vai para o banco. Apenas o hash calculado com custo 10 é salvo.
+    // CRIPTOGRAFAR A SENHA
     const senhaHash = await bcrypt.hash(senha, 10);
-    // O nível é decidido no servidor. Um eventual req.body.nivel é ignorado.
-    const nivel = 'usuario';
+
+    // CADASTRO PÚBLICO SEMPRE CRIA UM ADOTANTE
+    const nivel = 'adotante';
+
+    // SALVAR NO BANCO DE DADOS
     const [resultado] = await pool.execute(
-      'INSERT INTO usuarios (nome, email, senha, nivel) VALUES (?, ?, ?, ?)',
-      [nome, email, senhaHash, nivel],
+      `INSERT INTO usuarios
+       (nome, email, senha, nivel)
+       VALUES (?, ?, ?, ?)`,
+      [nome, email, senhaHash, nivel]
     );
 
     return res.status(201).json({
-      mensagem: 'Usuário cadastrado com sucesso.',
-      usuario: { id: resultado.insertId, nome, email, nivel },
+      mensagem: 'Conta criada com sucesso no PetMatch!',
+      usuario: {
+        id: resultado.insertId,
+        nome,
+        email,
+        nivel,
+      },
     });
   } catch (erro) {
-    // UNIQUE também protege contra dois cadastros simultâneos do mesmo e-mail.
     if (erro.code === 'ER_DUP_ENTRY') {
-      return res.status(409).json({ mensagem: 'E-mail já cadastrado.' });
+      return res.status(409).json({
+        mensagem: 'E-mail já cadastrado.',
+      });
     }
-    return res.status(500).json({ mensagem: 'Não foi possível cadastrar o usuário. Tente novamente.' });
+
+    console.error('Erro ao cadastrar:', erro);
+
+    return res.status(500).json({
+      mensagem: 'Não foi possível cadastrar o usuário.',
+    });
   }
 }
 
+// REALIZAR LOGIN
 export async function login(req, res) {
-  const email = typeof req.body.email === 'string' ? req.body.email.trim().toLowerCase() : '';
+  const email =
+    typeof req.body.email === 'string'
+      ? req.body.email.trim().toLowerCase()
+      : '';
+
   const senha = req.body.senha;
 
-  if (!emailValido(email) || typeof senha !== 'string' || !senha || Buffer.byteLength(senha, 'utf8') > 72) {
-    return res.status(400).json({ mensagem: 'Informe e-mail válido e senha.' });
+  // VALIDAR LOGIN
+  if (
+    !emailValido(email) ||
+    typeof senha !== 'string' ||
+    !senha ||
+    Buffer.byteLength(senha, 'utf8') > 72
+  ) {
+    return res.status(400).json({
+      mensagem: 'Informe e-mail válido e senha.',
+    });
   }
 
   try {
-    const [usuarios] = await pool.execute('SELECT id, nome, email, senha, nivel FROM usuarios WHERE email = ?', [email]);
+    // BUSCAR USUÁRIO NO MYSQL
+    const [usuarios] = await pool.execute(
+      `SELECT id, nome, email, senha, nivel
+       FROM usuarios
+       WHERE email = ?`,
+      [email]
+    );
+
     const usuario = usuarios[0];
 
-    // A mesma mensagem evita revelar se um e-mail específico está cadastrado.
-    if (!usuario || !(await bcrypt.compare(senha, usuario.senha))) {
-      return res.status(401).json({ mensagem: 'E-mail ou senha inválidos' });
+    // VERIFICAR A SENHA
+    if (
+      !usuario ||
+      !(await bcrypt.compare(senha, usuario.senha))
+    ) {
+      return res.status(401).json({
+        mensagem: 'E-mail ou senha inválidos.',
+      });
     }
 
-    // Payload: dados mínimos da sessão, sem senha e sem hash.
-    // Secret: segredo da API, lido do ambiente. expiresIn: validade de duas horas.
+    // GERAR TOKEN JWT
     const token = jwt.sign(
-      { id: usuario.id, email: usuario.email, nivel: usuario.nivel },
+      {
+        id: usuario.id,
+        email: usuario.email,
+        nivel: usuario.nivel,
+      },
       process.env.JWT_SECRET,
-      { expiresIn: '2h', algorithm: 'HS256' },
+      {
+        expiresIn: '2h',
+        algorithm: 'HS256',
+      }
     );
 
     return res.status(200).json({
       token,
-      usuario: { id: usuario.id, nome: usuario.nome, email: usuario.email, nivel: usuario.nivel },
+      usuario: {
+        id: usuario.id,
+        nome: usuario.nome,
+        email: usuario.email,
+        nivel: usuario.nivel,
+      },
     });
-  } catch {
-    return res.status(500).json({ mensagem: 'Não foi possível realizar o login. Tente novamente.' });
+  } catch (erro) {
+    console.error('Erro no login:', erro);
+
+    return res.status(500).json({
+      mensagem: 'Não foi possível realizar o login.',
+    });
   }
 }
 
+// CONSULTAR USUÁRIO AUTENTICADO
 export function usuarioAtual(req, res) {
-  // O middleware já validou o JWT e consultou os dados atuais. Nunca devolvemos o hash.
+  // O MIDDLEWARE JÁ VALIDOU O TOKEN JWT
   const { id, nome, email, nivel } = req.usuario;
-  return res.status(200).json({ id, nome, email, nivel });
+
+  return res.status(200).json({
+    id,
+    nome,
+    email,
+    nivel,
+  });
 }
 ```
 
 
-### loja-jwt/backend/controllers/produtosController.js
+### petmatch/backend/controllers/favoritosController.js
 
 ```js
-import pool from '../database/conexao.js';
-import { idValido, validarProduto } from '../utils/validacoes.js';
 
-export async function listarProdutos(req, res) {
-  try {
-    const [produtos] = await pool.execute('SELECT id, nome, descricao, categoria, preco, estoque, criado_em FROM produtos ORDER BY id DESC');
-    return res.status(200).json(produtos);
-  } catch {
-    return res.status(500).json({ mensagem: 'Não foi possível listar os produtos.' });
-  }
-}
-
-export async function buscarProdutoPorId(req, res) {
-  // req.params.id vem da URL e também precisa ser validado.
-  if (!idValido(req.params.id)) {
-    return res.status(400).json({ mensagem: 'ID do produto inválido.' });
-  }
-
-  try {
-    const [produtos] = await pool.execute(
-      'SELECT id, nome, descricao, categoria, preco, estoque, criado_em FROM produtos WHERE id = ?',
-      [Number(req.params.id)],
-    );
-    if (produtos.length === 0) {
-      return res.status(404).json({ mensagem: 'Produto não encontrado.' });
-    }
-    return res.status(200).json(produtos[0]);
-  } catch {
-    return res.status(500).json({ mensagem: 'Não foi possível buscar o produto.' });
-  }
-}
-
-export async function cadastrarProduto(req, res) {
-  const erroValidacao = validarProduto(req.body);
-  if (erroValidacao) {
-    return res.status(400).json({ mensagem: erroValidacao });
-  }
-
-  const nome = req.body.nome.trim();
-  const descricao = (req.body.descricao || '').trim();
-  const categoria = (req.body.categoria || '').trim();
-  const preco = Number(req.body.preco);
-  const estoque = Number(req.body.estoque);
-
-  try {
-    // Os valores externos entram nos parâmetros ?, sem concatenar dados na consulta SQL.
-    const [resultado] = await pool.execute(
-      'INSERT INTO produtos (nome, descricao, categoria, preco, estoque) VALUES (?, ?, ?, ?, ?)',
-      [nome, descricao, categoria, preco, estoque],
-    );
-    return res.status(201).json({
-      mensagem: 'Produto cadastrado com sucesso.',
-      produto: { id: resultado.insertId, nome, descricao, categoria, preco, estoque },
-    });
-  } catch {
-    return res.status(500).json({ mensagem: 'Não foi possível cadastrar o produto.' });
-  }
-}
-
-export async function atualizarProduto(req, res) {
-  if (!idValido(req.params.id)) {
-    return res.status(400).json({ mensagem: 'ID do produto inválido.' });
-  }
-  const erroValidacao = validarProduto(req.body);
-  if (erroValidacao) {
-    return res.status(400).json({ mensagem: erroValidacao });
-  }
-
-  const id = Number(req.params.id);
-  const nome = req.body.nome.trim();
-  const descricao = (req.body.descricao || '').trim();
-  const categoria = (req.body.categoria || '').trim();
-  const preco = Number(req.body.preco);
-  const estoque = Number(req.body.estoque);
-
-  try {
-    // A consulta inicial distingue "não existe" de uma atualização sem mudanças.
-    const [existentes] = await pool.execute('SELECT id FROM produtos WHERE id = ?', [id]);
-    if (existentes.length === 0) {
-      return res.status(404).json({ mensagem: 'Produto não encontrado.' });
-    }
-    await pool.execute('UPDATE produtos SET nome = ?, descricao = ?, categoria = ?, preco = ?, estoque = ? WHERE id = ?', [nome, descricao, categoria, preco, estoque, id]);
-    return res.status(200).json({
-      mensagem: 'Produto atualizado com sucesso.',
-      produto: { id, nome, descricao, categoria, preco, estoque },
-    });
-  } catch {
-    return res.status(500).json({ mensagem: 'Não foi possível atualizar o produto.' });
-  }
-}
-
-export async function excluirProduto(req, res) {
-  if (!idValido(req.params.id)) {
-    return res.status(400).json({ mensagem: 'ID do produto inválido.' });
-  }
-
-  try {
-    const [resultado] = await pool.execute('DELETE FROM produtos WHERE id = ?', [Number(req.params.id)]);
-    if (resultado.affectedRows === 0) {
-      return res.status(404).json({ mensagem: 'Produto não encontrado.' });
-    }
-    return res.status(200).json({ mensagem: 'Produto excluído com sucesso.' });
-  } catch {
-    return res.status(500).json({ mensagem: 'Não foi possível excluir o produto.' });
-  }
-}
-```
-
-
-### loja-jwt/backend/controllers/usuariosController.js
-
-```js
 import pool from '../database/conexao.js';
 import { idValido } from '../utils/validacoes.js';
 
-export async function listarUsuarios(req, res) {
+// READ - LISTAR OS ANIMAIS FAVORITOS DO USUÁRIO
+export async function listarFavoritos(req, res) {
+  const usuarioId = req.usuario.id;
+
   try {
-    // Escolhemos as colunas explicitamente: senha e hash nunca saem da API.
-    const [usuarios] = await pool.execute('SELECT id, nome, email, nivel, criado_em FROM usuarios ORDER BY id');
-    return res.status(200).json(usuarios);
-  } catch {
-    return res.status(500).json({ mensagem: 'Não foi possível listar os usuários.' });
+    const [favoritos] = await pool.execute(
+      `SELECT
+        f.id,
+        f.animal_id,
+        f.criado_em,
+        a.nome,
+        a.especie,
+        a.raca,
+        a.idade,
+        a.unidade_idade,
+        a.porte,
+        a.sexo,
+        a.cidade,
+        a.descricao,
+        a.foto,
+        a.status
+       FROM favoritos f
+       INNER JOIN animais a ON a.id = f.animal_id
+       WHERE f.usuario_id = ?
+       ORDER BY f.criado_em DESC, f.id DESC`,
+      [usuarioId]
+    );
+
+    return res.status(200).json(favoritos);
+  } catch (erro) {
+    console.error('Erro ao listar favoritos:', erro);
+
+    return res.status(500).json({
+      mensagem: 'Não foi possível carregar seus favoritos.',
+    });
   }
 }
 
+// CREATE - ADICIONAR UM ANIMAL AOS FAVORITOS
+export async function adicionarFavorito(req, res) {
+  const usuarioId = req.usuario.id;
+  const animalId = req.body.animal_id;
+
+  if (!idValido(animalId)) {
+    return res.status(400).json({
+      mensagem: 'ID do animal inválido.',
+    });
+  }
+
+  try {
+    // VERIFICAR SE O ANIMAL EXISTE
+    const [animais] = await pool.execute(
+      'SELECT id FROM animais WHERE id = ?',
+      [Number(animalId)]
+    );
+
+    if (animais.length === 0) {
+      return res.status(404).json({
+        mensagem: 'Animal não encontrado.',
+      });
+    }
+
+    // VERIFICAR SE O ANIMAL JÁ ESTÁ NOS FAVORITOS
+    const [existentes] = await pool.execute(
+      `SELECT id FROM favoritos
+       WHERE usuario_id = ? AND animal_id = ?`,
+      [usuarioId, Number(animalId)]
+    );
+
+    if (existentes.length > 0) {
+      return res.status(409).json({
+        mensagem: 'Este animal já está nos seus favoritos.',
+      });
+    }
+
+    // SALVAR O FAVORITO NO MYSQL
+    const [resultado] = await pool.execute(
+      `INSERT INTO favoritos (usuario_id, animal_id)
+       VALUES (?, ?)`,
+      [usuarioId, Number(animalId)]
+    );
+
+    return res.status(201).json({
+      mensagem: 'Animal adicionado aos favoritos!',
+      favorito: {
+        id: resultado.insertId,
+        usuario_id: usuarioId,
+        animal_id: Number(animalId),
+      },
+    });
+  } catch (erro) {
+    if (erro.code === 'ER_DUP_ENTRY') {
+      return res.status(409).json({
+        mensagem: 'Este animal já está nos seus favoritos.',
+      });
+    }
+
+    console.error('Erro ao adicionar favorito:', erro);
+
+    return res.status(500).json({
+      mensagem: 'Não foi possível adicionar o favorito.',
+    });
+  }
+}
+
+// DELETE - REMOVER UM ANIMAL DOS FAVORITOS
+export async function removerFavorito(req, res) {
+  const usuarioId = req.usuario.id;
+  const animalId = req.params.animalId;
+
+  if (!idValido(animalId)) {
+    return res.status(400).json({
+      mensagem: 'ID do animal inválido.',
+    });
+  }
+
+  try {
+    // REMOVER APENAS O FAVORITO DO USUÁRIO LOGADO
+    const [resultado] = await pool.execute(
+      `DELETE FROM favoritos
+       WHERE usuario_id = ? AND animal_id = ?`,
+      [usuarioId, Number(animalId)]
+    );
+
+    if (resultado.affectedRows === 0) {
+      return res.status(404).json({
+        mensagem: 'Animal não encontrado nos seus favoritos.',
+      });
+    }
+
+    return res.status(200).json({
+      mensagem: 'Animal removido dos favoritos.',
+    });
+  } catch (erro) {
+    console.error('Erro ao remover favorito:', erro);
+
+    return res.status(500).json({
+      mensagem: 'Não foi possível remover o favorito.',
+    });
+  }
+}
+```
+
+
+### petmatch/backend/controllers/usuariosController.js
+
+```js
+
+import pool from '../database/conexao.js';
+import { idValido } from '../utils/validacoes.js';
+
+// READ - LISTAR USUÁRIOS CADASTRADOS
+export async function listarUsuarios(req, res) {
+  // SOMENTE ADMINISTRADORES PODEM CONSULTAR A LISTA
+  if (req.usuario?.nivel !== 'admin') {
+    return res.status(403).json({
+      mensagem: 'Acesso permitido apenas para administradores.',
+    });
+  }
+
+  try {
+    // BUSCAR USUÁRIOS SEM EXPOR SENHAS OU HASHES
+    const [usuarios] = await pool.execute(
+      `SELECT
+        id,
+        nome,
+        email,
+        nivel,
+        criado_em
+       FROM usuarios
+       ORDER BY id`
+    );
+
+    return res.status(200).json(usuarios);
+  } catch (erro) {
+    console.error('Erro ao listar usuários:', erro);
+
+    return res.status(500).json({
+      mensagem: 'Não foi possível listar os usuários.',
+    });
+  }
+}
+
+// UPDATE - ALTERAR NÍVEL DE ACESSO
 export async function alterarNivelUsuario(req, res) {
+  // VERIFICAR PERMISSÃO DO ADMINISTRADOR
+  if (req.usuario?.nivel !== 'admin') {
+    return res.status(403).json({
+      mensagem: 'Acesso permitido apenas para administradores.',
+    });
+  }
+
+  // VALIDAR ID DO USUÁRIO
   if (!idValido(req.params.id)) {
-    return res.status(400).json({ mensagem: 'ID do usuário inválido.' });
+    return res.status(400).json({
+      mensagem: 'ID do usuário inválido.',
+    });
   }
 
   const id = Number(req.params.id);
   const nivel = req.body.nivel;
+
+  // IMPEDIR ALTERAÇÃO DO PRÓPRIO NÍVEL
   if (id === Number(req.usuario.id)) {
-    return res.status(400).json({ mensagem: 'Não é possível alterar o próprio nível' });
+    return res.status(400).json({
+      mensagem: 'Você não pode alterar seu próprio nível de acesso.',
+    });
   }
-  if (nivel !== 'usuario' && nivel !== 'admin') {
-    return res.status(400).json({ mensagem: 'O nível deve ser usuario ou admin.' });
+
+  // VALIDAR OS NÍVEIS PERMITIDOS
+  const niveisPermitidos = [
+    'adotante',
+    'ong',
+    'protetor',
+    'admin',
+  ];
+
+  if (!niveisPermitidos.includes(nivel)) {
+    return res.status(400).json({
+      mensagem:
+        'O nível deve ser adotante, ong, protetor ou admin.',
+    });
   }
 
   try {
-    const [usuarios] = await pool.execute('SELECT id, nome, email, nivel FROM usuarios WHERE id = ?', [id]);
+    // VERIFICAR SE O USUÁRIO EXISTE
+    const [usuarios] = await pool.execute(
+      `SELECT id, nome, email, nivel
+       FROM usuarios
+       WHERE id = ?`,
+      [id]
+    );
+
     if (usuarios.length === 0) {
-      return res.status(404).json({ mensagem: 'Usuário não encontrado.' });
+      return res.status(404).json({
+        mensagem: 'Usuário não encontrado.',
+      });
     }
 
-    await pool.execute('UPDATE usuarios SET nivel = ? WHERE id = ?', [nivel, id]);
+    // ATUALIZAR O NÍVEL NO MYSQL
+    await pool.execute(
+      'UPDATE usuarios SET nivel = ? WHERE id = ?',
+      [nivel, id]
+    );
+
     return res.status(200).json({
-      mensagem: 'Nível do usuário atualizado com sucesso.',
-      usuario: { ...usuarios[0], nivel },
+      mensagem: 'Nível de acesso atualizado com sucesso.',
+      usuario: {
+        ...usuarios[0],
+        nivel,
+      },
     });
-  } catch {
-    return res.status(500).json({ mensagem: 'Não foi possível alterar o nível do usuário.' });
+  } catch (erro) {
+    console.error('Erro ao alterar nível:', erro);
+
+    return res.status(500).json({
+      mensagem: 'Não foi possível alterar o nível do usuário.',
+    });
   }
 }
 ```
 
 
-### loja-jwt/backend/database/conexao.js
+### petmatch/backend/database/conexao.js
 
 ```js
 import '../config/ambiente.js';
 import mysql from 'mysql2/promise';
 
-// O pool reaproveita conexões. Credenciais vêm do ambiente, nunca do código-fonte.
+// Conexão do PetMatch com o banco de dados MySQL
 const pool = mysql.createPool({
   host: process.env.DB_HOST,
   port: Number(process.env.DB_PORT || 3306),
@@ -458,55 +1339,100 @@ export default pool;
 ```
 
 
-### loja-jwt/backend/middlewares/autenticarToken.js
+### petmatch/backend/middlewares/autenticarToken.js
 
 ```js
+
 import jwt from 'jsonwebtoken';
 import pool from '../database/conexao.js';
 
 export default async function autenticarToken(req, res, next) {
-  // O cliente envia duas partes: Authorization: Bearer TOKEN.
+  // RECEBER O TOKEN JWT DO APLICATIVO
   const authorization = req.headers.authorization;
-  const partes = typeof authorization === 'string' ? authorization.trim().split(/\s+/) : [];
 
-  if (partes.length !== 2 || partes[0].toLowerCase() !== 'bearer' || !partes[1]) {
-    return res.status(401).json({ mensagem: 'Token não informado. Utilize Authorization: Bearer TOKEN.' });
+  const partes =
+    typeof authorization === 'string'
+      ? authorization.trim().split(/\s+/)
+      : [];
+
+  // VERIFICAR SE O TOKEN FOI INFORMADO
+  if (
+    partes.length !== 2 ||
+    partes[0].toLowerCase() !== 'bearer' ||
+    !partes[1]
+  ) {
+    return res.status(401).json({
+      mensagem:
+        'Token não informado. Utilize Authorization: Bearer TOKEN.',
+    });
   }
 
   let payload;
-  try {
-    // verify confere assinatura e expiração. decode, sozinho, não autentica ninguém.
-    payload = jwt.verify(partes[1], process.env.JWT_SECRET, { algorithms: ['HS256'] });
 
-    if (typeof payload !== 'object' || !Number.isInteger(payload.id) || payload.id < 1) {
-      return res.status(401).json({ mensagem: 'Token inválido ou expirado. Faça login novamente.' });
+  try {
+    // VERIFICAR ASSINATURA E VALIDADE DO JWT
+    payload = jwt.verify(
+      partes[1],
+      process.env.JWT_SECRET,
+      {
+        algorithms: ['HS256'],
+      }
+    );
+
+    if (
+      typeof payload !== 'object' ||
+      !Number.isInteger(payload.id) ||
+      payload.id < 1
+    ) {
+      return res.status(401).json({
+        mensagem:
+          'Token inválido ou expirado. Faça login novamente.',
+      });
     }
   } catch {
-    return res.status(401).json({ mensagem: 'Token inválido ou expirado. Faça login novamente.' });
+    return res.status(401).json({
+      mensagem:
+        'Token inválido ou expirado. Faça login novamente.',
+    });
   }
 
   try {
+    // BUSCAR DADOS ATUAIS DO USUÁRIO NO MYSQL
     const [usuarios] = await pool.execute(
-      'SELECT id, nome, email, nivel FROM usuarios WHERE id = ?',
-      [payload.id],
+      `SELECT id, nome, email, nivel
+       FROM usuarios
+       WHERE id = ?`,
+      [payload.id]
     );
 
     if (usuarios.length === 0) {
-      return res.status(401).json({ mensagem: 'Usuário não encontrado. Faça login novamente.' });
+      return res.status(401).json({
+        mensagem:
+          'Usuário não encontrado. Faça login novamente.',
+      });
     }
 
-    // O payload identifica a sessão, mas o banco define o nível ATUAL.
-    // Rebaixar um administrador tem efeito imediato, mesmo com um JWT antigo ainda válido.
-    req.usuario = { ...payload, ...usuarios[0] };
+    // UTILIZAR O NÍVEL ATUAL DO BANCO DE DADOS
+    req.usuario = {
+      ...payload,
+      ...usuarios[0],
+    };
+
+    // PERMITIR CONTINUAR PARA A ROTA
     next();
-  } catch {
-    return res.status(500).json({ mensagem: 'Não foi possível verificar a sessão. Tente novamente.' });
+  } catch (erro) {
+    console.error('Erro ao verificar sessão:', erro);
+
+    return res.status(500).json({
+      mensagem:
+        'Não foi possível verificar a sessão. Tente novamente.',
+    });
   }
 }
 ```
 
 
-### loja-jwt/backend/middlewares/somenteAdmin.js
+### petmatch/backend/middlewares/somenteAdmin.js
 
 ```js
 export default function somenteAdmin(req, res, next) {
@@ -520,7 +1446,113 @@ export default function somenteAdmin(req, res, next) {
 ```
 
 
-### loja-jwt/backend/routes/authRoutes.js
+### petmatch/backend/routes/adocoesRoutes.js
+
+```js
+
+import { Router } from 'express';
+
+import {
+  solicitarAdocao,
+  listarAdocoes,
+  atualizarStatusAdocao,
+  cancelarAdocao,
+} from '../controllers/adocoesController.js';
+
+import autenticarToken from '../middlewares/autenticarToken.js';
+
+const router = Router();
+
+// TODAS AS ROTAS EXIGEM LOGIN
+router.use(autenticarToken);
+
+// CREATE - SOLICITAR A ADOÇÃO DE UM ANIMAL
+router.post('/', solicitarAdocao);
+
+// READ - LISTAR SOLICITAÇÕES DE ADOÇÃO
+router.get('/', listarAdocoes);
+
+// UPDATE - APROVAR OU RECUSAR UMA SOLICITAÇÃO
+router.put('/:id/status', atualizarStatusAdocao);
+
+// UPDATE - CANCELAR UMA SOLICITAÇÃO PENDENTE
+router.put('/:id/cancelar', cancelarAdocao);
+
+export default router;
+```
+
+
+### petmatch/backend/routes/animaisRoutes.js
+
+```js
+
+import { Router } from 'express';
+
+import {
+  listarAnimais,
+  buscarAnimalPorId,
+  cadastrarAnimal,
+  atualizarAnimal,
+  excluirAnimal,
+} from '../controllers/animaisController.js';
+
+import autenticarToken from '../middlewares/autenticarToken.js';
+
+const router = Router();
+
+// TODAS AS ROTAS EXIGEM AUTENTICAÇÃO JWT
+router.use(autenticarToken);
+
+// VERIFICAR SE O USUÁRIO PODE GERENCIAR ANIMAIS
+function permitirGerenciamento(req, res, next) {
+  const nivel = req.usuario?.nivel;
+
+  if (
+    nivel !== 'ong' &&
+    nivel !== 'protetor' &&
+    nivel !== 'admin'
+  ) {
+    return res.status(403).json({
+      mensagem:
+        'Apenas ONGs, protetores e administradores podem gerenciar animais.',
+    });
+  }
+
+  next();
+}
+
+// READ - LISTAR TODOS OS ANIMAIS
+router.get('/', listarAnimais);
+
+// READ - BUSCAR UM ANIMAL PELO ID
+router.get('/:id', buscarAnimalPorId);
+
+// CREATE - CADASTRAR UM NOVO ANIMAL
+router.post(
+  '/',
+  permitirGerenciamento,
+  cadastrarAnimal
+);
+
+// UPDATE - ATUALIZAR UM ANIMAL
+router.put(
+  '/:id',
+  permitirGerenciamento,
+  atualizarAnimal
+);
+
+// DELETE - EXCLUIR UM ANIMAL
+router.delete(
+  '/:id',
+  permitirGerenciamento,
+  excluirAnimal
+);
+
+export default router;
+```
+
+
+### petmatch/backend/routes/authRoutes.js
 
 ```js
 import { Router } from 'express';
@@ -538,29 +1570,39 @@ export default router;
 ```
 
 
-### loja-jwt/backend/routes/produtosRoutes.js
+### petmatch/backend/routes/favoritosRoutes.js
 
 ```js
+
 import { Router } from 'express';
-import { listarProdutos, buscarProdutoPorId, cadastrarProduto, atualizarProduto, excluirProduto } from '../controllers/produtosController.js';
+
+import {
+  listarFavoritos,
+  adicionarFavorito,
+  removerFavorito,
+} from '../controllers/favoritosController.js';
+
 import autenticarToken from '../middlewares/autenticarToken.js';
-import somenteAdmin from '../middlewares/somenteAdmin.js';
 
 const router = Router();
 
-// Todas as operações exigem login. Alterações exigem também o nível admin.
+// TODAS AS ROTAS EXIGEM LOGIN
 router.use(autenticarToken);
-router.get('/', listarProdutos);
-router.get('/:id', buscarProdutoPorId);
-router.post('/', somenteAdmin, cadastrarProduto);
-router.put('/:id', somenteAdmin, atualizarProduto);
-router.delete('/:id', somenteAdmin, excluirProduto);
+
+// READ - LISTAR OS ANIMAIS FAVORITOS
+router.get('/', listarFavoritos);
+
+// CREATE - ADICIONAR UM ANIMAL AOS FAVORITOS
+router.post('/', adicionarFavorito);
+
+// DELETE - REMOVER UM ANIMAL DOS FAVORITOS
+router.delete('/:animalId', removerFavorito);
 
 export default router;
 ```
 
 
-### loja-jwt/backend/routes/usuariosRoutes.js
+### petmatch/backend/routes/usuariosRoutes.js
 
 ```js
 import { Router } from 'express';
@@ -579,7 +1621,7 @@ export default router;
 ```
 
 
-### loja-jwt/backend/scripts/criarAdmin.js
+### petmatch/backend/scripts/criarAdmin.js
 
 ```js
 import bcrypt from 'bcryptjs';
@@ -624,7 +1666,7 @@ criarAdministrador();
 ```
 
 
-### loja-jwt/backend/tests/api.test.js
+### petmatch/backend/tests/api.test.js
 
 ```js
 import { after, before, beforeEach, test } from 'node:test';
@@ -639,10 +1681,12 @@ process.env.JWT_SECRET = randomBytes(48).toString('hex');
 const { default: app } = await import('../app.js');
 const { default: pool } = await import('../database/conexao.js');
 
+const dadosAnimal = { nome: 'Luna', especie: 'Gato', raca: 'SRD', idade: 2, unidade_idade: 'anos', porte: 'Pequeno', sexo: 'Fêmea', cidade: 'Porto Alegre', descricao: 'Animal para adoção', saude: 'Vacinada', foto: '', status: 'disponivel' };
+
 let servidor;
 let base;
 let usuarios;
-let produtos;
+let animais;
 let senhaTeste;
 let senhaHash;
 let executarOriginal;
@@ -661,11 +1705,11 @@ before(async function prepararServidor() {
 
 beforeEach(function reiniciarDados() {
   usuarios = [
-    { id: 1, nome: 'Estudante', email: 'estudante@example.test', senha: senhaHash, nivel: 'usuario' },
+    { id: 1, nome: 'Estudante', email: 'estudante@example.test', senha: senhaHash, nivel: 'adotante' },
     { id: 2, nome: 'Administrador', email: 'admin@example.test', senha: senhaHash, nivel: 'admin' },
     { id: 3, nome: 'Outra administradora', email: 'outra@example.test', senha: senhaHash, nivel: 'admin' },
   ];
-  produtos = [{ id: 1, nome: 'Mouse', descricao: 'Mouse USB', categoria: 'Periféricos', preco: 49.90, estoque: 8 }];
+  animais = [{ id: 1, usuario_id: 2, ...dadosAnimal, nome: 'Luna' }];
   chamadas = [];
 });
 
@@ -680,6 +1724,7 @@ after(async function encerrarServidor() {
 
 // Mock pequeno dos resultados usados pelos controllers. Não tenta implementar um servidor SQL.
 async function executarEmMemoria(sql, parametros = []) {
+  sql = sql.replace(/\s+/g, ' ').trim();
   chamadas.push({ sql, parametros });
   if (sql.startsWith('SELECT') && sql.includes('FROM usuarios')) {
     let encontrados = usuarios;
@@ -703,25 +1748,25 @@ async function executarEmMemoria(sql, parametros = []) {
     if (usuario) usuario.nivel = parametros[0];
     return [{ affectedRows: usuario ? 1 : 0 }];
   }
-  if (sql.startsWith('SELECT') && sql.includes('FROM produtos')) {
-    const encontrados = sql.includes('WHERE id = ?') ? produtos.filter(function porId(produto) { return produto.id === parametros[0]; }) : produtos;
-    return [encontrados.map(function copiar(produto) { return { ...produto }; })];
+  if (sql.startsWith('SELECT') && sql.includes('FROM animais')) {
+    const encontrados = sql.includes('WHERE id = ?') ? animais.filter(function porId(animal) { return animal.id === parametros[0]; }) : animais;
+    return [encontrados.map(function copiar(animal) { return { ...animal }; })];
   }
-  if (sql.startsWith('INSERT INTO produtos')) {
-    const [nome, descricao, categoria, preco, estoque] = parametros;
-    const id = Math.max(0, ...produtos.map(function obterId(produto) { return produto.id; })) + 1;
-    produtos.push({ id, nome, descricao, categoria, preco, estoque });
+  if (sql.startsWith('INSERT INTO animais')) {
+    const [usuario_id, nome, especie, raca, idade, unidade_idade, porte, sexo, cidade, descricao, saude, foto, status] = parametros;
+    const id = Math.max(0, ...animais.map(function obterId(animal) { return animal.id; })) + 1;
+    animais.push({ id, usuario_id, nome, especie, raca, idade, unidade_idade, porte, sexo, cidade, descricao, saude, foto, status });
     return [{ insertId: id, affectedRows: 1 }];
   }
-  if (sql.startsWith('UPDATE produtos')) {
-    const [nome, descricao, categoria, preco, estoque, id] = parametros;
-    const produto = produtos.find(function porId(item) { return item.id === id; });
-    if (produto) Object.assign(produto, { nome, descricao, categoria, preco, estoque });
-    return [{ affectedRows: produto ? 1 : 0 }];
+  if (sql.startsWith('UPDATE animais')) {
+    const [nome, especie, raca, idade, unidade_idade, porte, sexo, cidade, descricao, saude, foto, status, id] = parametros;
+    const animal = animais.find(function porId(item) { return item.id === id; });
+    if (animal) Object.assign(animal, { nome, especie, raca, idade, unidade_idade, porte, sexo, cidade, descricao, saude, foto, status });
+    return [{ affectedRows: animal ? 1 : 0 }];
   }
-  if (sql.startsWith('DELETE FROM produtos')) {
-    const indice = produtos.findIndex(function porId(produto) { return produto.id === parametros[0]; });
-    if (indice >= 0) produtos.splice(indice, 1);
+  if (sql.startsWith('DELETE FROM animais')) {
+    const indice = animais.findIndex(function porId(animal) { return animal.id === parametros[0]; });
+    if (indice >= 0) animais.splice(indice, 1);
     return [{ affectedRows: indice >= 0 ? 1 : 0 }];
   }
   throw new Error('Consulta não prevista no mock.');
@@ -744,8 +1789,8 @@ async function requisitar(caminho, { metodo = 'GET', token, dados } = {}) {
   return { status: resposta.status, dados: await resposta.json(), headers: resposta.headers };
 }
 
-test('sem token, produtos e usuários retornam 401 antes de consultar o banco', async function verificarSemToken() {
-  for (const caminho of ['/produtos', '/produtos/1', '/usuarios', '/auth/me']) {
+test('sem token, animais e usuários retornam 401 antes de consultar o banco', async function verificarSemToken() {
+  for (const caminho of ['/animais', '/animais/1', '/usuarios', '/auth/me']) {
     assert.equal((await requisitar(caminho)).status, 401);
   }
   assert.equal(chamadas.length, 0);
@@ -754,13 +1799,13 @@ test('sem token, produtos e usuários retornam 401 antes de consultar o banco', 
 test('JWT inválido, expirado ou com outro algoritmo retorna 401', async function verificarJwt() {
   const tokens = ['token-invalido', criarToken(1, { expiresIn: -1 }), criarToken(1, { algorithm: 'HS384' })];
   for (const token of tokens) {
-    assert.equal((await requisitar('/produtos', { token })).status, 401);
+    assert.equal((await requisitar('/animais', { token })).status, 401);
   }
   assert.equal(chamadas.length, 0);
 });
 
 test('Bearer malformado não autentica e usuário removido não mantém a sessão', async function verificarBearer() {
-  const resposta = await fetch(base + '/produtos', { headers: { Authorization: 'Basic ' + criarToken(1) } });
+  const resposta = await fetch(base + '/animais', { headers: { Authorization: 'Basic ' + criarToken(1) } });
   assert.equal(resposta.status, 401);
   assert.equal((await requisitar('/auth/me', { token: criarToken(999) })).status, 401);
 });
@@ -768,7 +1813,7 @@ test('Bearer malformado não autentica e usuário removido não mantém a sessã
 test('cadastro ignora nivel admin e armazena somente um hash bcrypt de custo 10', async function verificarCadastro() {
   const resultado = await requisitar('/auth/cadastro', { metodo: 'POST', dados: { nome: ' Nova conta ', email: ' NOVA@EXAMPLE.TEST ', senha: senhaTeste, nivel: 'admin' } });
   assert.equal(resultado.status, 201);
-  assert.equal(resultado.dados.usuario.nivel, 'usuario');
+  assert.equal(resultado.dados.usuario.nivel, 'adotante');
   assert.equal(resultado.dados.usuario.email, 'nova@example.test');
   assert.equal('senha' in resultado.dados.usuario, false);
   const salva = usuarios.at(-1);
@@ -776,7 +1821,7 @@ test('cadastro ignora nivel admin e armazena somente um hash bcrypt de custo 10'
   assert.equal(bcrypt.getRounds(salva.senha), 10);
   assert.equal(await bcrypt.compare(senhaTeste, salva.senha), true);
   const insercao = chamadas.find(function encontrar(chamada) { return chamada.sql.startsWith('INSERT'); });
-  assert.equal(insercao.parametros[3], 'usuario');
+  assert.equal(insercao.parametros[3], 'adotante');
   assert.equal(insercao.sql.includes('nova@example.test'), false);
 });
 
@@ -807,17 +1852,17 @@ test('login com conta ausente e senha errada usa a mesma resposta genérica', as
   assert.equal(incorreta.status, 401);
   assert.equal(ausente.status, 401);
   assert.deepEqual(incorreta.dados, ausente.dados);
-  assert.equal(incorreta.dados.mensagem, 'E-mail ou senha inválidos');
+  assert.equal(incorreta.dados.mensagem, 'E-mail ou senha inválidos.');
 });
 
-test('usuário consulta produtos, detalhes e /me; não modifica produtos nem gerencia usuários', async function verificarUsuario() {
+test('usuário consulta animais, detalhes e /me; não modifica animais nem gerencia usuários', async function verificarUsuario() {
   const token = criarToken(1);
-  assert.equal((await requisitar('/produtos', { token })).status, 200);
-  assert.equal((await requisitar('/produtos/1', { token })).dados.nome, 'Mouse');
+  assert.equal((await requisitar('/animais', { token })).status, 200);
+  assert.equal((await requisitar('/animais/1', { token })).dados.nome, 'Luna');
   const atual = await requisitar('/auth/me', { token });
-  assert.deepEqual(atual.dados, { id: 1, nome: usuarios[0].nome, email: usuarios[0].email, nivel: 'usuario' });
+  assert.deepEqual(atual.dados, { id: 1, nome: usuarios[0].nome, email: usuarios[0].email, nivel: 'adotante' });
   for (const metodo of ['POST', 'PUT', 'DELETE']) {
-    const caminho = metodo === 'POST' ? '/produtos' : '/produtos/1';
+    const caminho = metodo === 'POST' ? '/animais' : '/animais/1';
     assert.equal((await requisitar(caminho, { metodo, token, dados: {} })).status, 403);
   }
   assert.equal((await requisitar('/usuarios', { token })).status, 403);
@@ -826,28 +1871,27 @@ test('usuário consulta produtos, detalhes e /me; não modifica produtos nem ger
 
 test('administrador executa CRUD completo e recebe 404 após exclusão', async function verificarCrud() {
   const token = criarToken(2);
-  const dados = { nome: 'Teclado', descricao: 'Teclado USB', categoria: 'Periféricos', preco: 89.90, estoque: 5 };
-  const criada = await requisitar('/produtos', { metodo: 'POST', token, dados });
+  const dados = { ...dadosAnimal, nome: 'Mia' };
+  const criada = await requisitar('/animais', { metodo: 'POST', token, dados });
   assert.equal(criada.status, 201);
-  const id = criada.dados.produto.id;
-  assert.equal((await requisitar('/produtos/' + id, { token })).dados.nome, 'Teclado');
-  assert.equal((await requisitar('/produtos', { token })).dados.length, 2);
-  const alterada = await requisitar('/produtos/' + id, { metodo: 'PUT', token, dados: { ...dados, preco: 79.90, estoque: 4 } });
+  const id = criada.dados.animal.id;
+  assert.equal((await requisitar('/animais/' + id, { token })).dados.nome, 'Mia');
+  assert.equal((await requisitar('/animais', { token })).dados.length, 2);
+  const alterada = await requisitar('/animais/' + id, { metodo: 'PUT', token, dados: { ...dados, nome: 'Mia atualizada' } });
   assert.equal(alterada.status, 200);
-  assert.equal(alterada.dados.produto.preco, 79.90);
-  assert.equal((await requisitar('/produtos/' + id, { metodo: 'DELETE', token })).status, 200);
-  assert.equal((await requisitar('/produtos/' + id, { token })).status, 404);
-  assert.equal((await requisitar('/produtos/' + id, { metodo: 'DELETE', token })).status, 404);
+  assert.equal((await requisitar('/animais/' + id, { token })).dados.nome, 'Mia atualizada');
+  assert.equal((await requisitar('/animais/' + id, { metodo: 'DELETE', token })).status, 200);
+  assert.equal((await requisitar('/animais/' + id, { token })).status, 404);
+  assert.equal((await requisitar('/animais/' + id, { metodo: 'DELETE', token })).status, 404);
 });
 
-test('preço e estoque inválidos são rejeitados, incluindo coerções perigosas', async function verificarProdutoInvalido() {
+test('dados inválidos do animal são rejeitados', async function verificarAnimalInvalido() {
   const token = criarToken(2);
-  const baseProduto = { nome: 'Produto', preco: 10, estoque: 1 };
-  for (const alteracoes of [{ preco: -1 }, { preco: '' }, { preco: true }, { preco: 1.234 }, { preco: 100000000 }, { estoque: -1 }, { estoque: 1.5 }, { estoque: '' }, { estoque: true }, { nome: ' '.repeat(3) }, { descricao: 'x'.repeat(501) }]) {
-    assert.equal((await requisitar('/produtos', { metodo: 'POST', token, dados: { ...baseProduto, ...alteracoes } })).status, 400);
+  for (const alteracoes of [{ nome: ' ' }, { especie: 'Ave' }, { idade: -1 }, { idade: 1.5 }, { unidade_idade: 'dias' }, { porte: 'Inválido' }, { sexo: 'Inválido' }, { cidade: '' }, { foto: 'arquivo-local' }, { descricao: 'x'.repeat(1001) }]) {
+    assert.equal((await requisitar('/animais', { metodo: 'POST', token, dados: { ...dadosAnimal, ...alteracoes } })).status, 400);
   }
-  assert.equal((await requisitar('/produtos/1abc', { token })).status, 400);
-  assert.equal((await requisitar('/produtos/999', { metodo: 'PUT', token, dados: baseProduto })).status, 404);
+  assert.equal((await requisitar('/animais/1abc', { token })).status, 400);
+  assert.equal((await requisitar('/animais/999', { metodo: 'PUT', token, dados: dadosAnimal })).status, 404);
 });
 
 test('admin lista usuários sem hash e altera somente níveis válidos de outras contas', async function verificarAdministracao() {
@@ -855,7 +1899,7 @@ test('admin lista usuários sem hash e altera somente níveis válidos de outras
   const lista = await requisitar('/usuarios', { token });
   assert.equal(lista.status, 200);
   for (const usuario of lista.dados) assert.equal('senha' in usuario, false);
-  assert.equal((await requisitar('/usuarios/2/nivel', { metodo: 'PUT', token, dados: { nivel: 'usuario' } })).status, 400);
+  assert.equal((await requisitar('/usuarios/2/nivel', { metodo: 'PUT', token, dados: { nivel: 'adotante' } })).status, 400);
   assert.equal((await requisitar('/usuarios/1/nivel', { metodo: 'PUT', token, dados: { nivel: 'superadmin' } })).status, 400);
   assert.equal((await requisitar('/usuarios/999/nivel', { metodo: 'PUT', token, dados: { nivel: 'admin' } })).status, 404);
   const promocao = await requisitar('/usuarios/1/nivel', { metodo: 'PUT', token, dados: { nivel: 'admin' } });
@@ -867,12 +1911,12 @@ test('admin lista usuários sem hash e altera somente níveis válidos de outras
 test('rebaixamento revoga administração imediatamente, mesmo com JWT admin ainda válido', async function verificarRebaixamento() {
   const tokenAntigo = criarToken(3);
   assert.equal((await requisitar('/usuarios', { token: tokenAntigo })).status, 200);
-  const alteracao = await requisitar('/usuarios/3/nivel', { metodo: 'PUT', token: criarToken(2), dados: { nivel: 'usuario' } });
+  const alteracao = await requisitar('/usuarios/3/nivel', { metodo: 'PUT', token: criarToken(2), dados: { nivel: 'adotante' } });
   assert.equal(alteracao.status, 200);
   assert.equal(jwt.verify(tokenAntigo, process.env.JWT_SECRET).nivel, 'admin');
   assert.equal((await requisitar('/usuarios', { token: tokenAntigo })).status, 403);
-  assert.equal((await requisitar('/produtos', { metodo: 'POST', token: tokenAntigo, dados: {} })).status, 403);
-  assert.equal((await requisitar('/auth/me', { token: tokenAntigo })).dados.nivel, 'usuario');
+  assert.equal((await requisitar('/animais', { metodo: 'POST', token: tokenAntigo, dados: {} })).status, 403);
+  assert.equal((await requisitar('/auth/me', { token: tokenAntigo })).dados.nivel, 'adotante');
 });
 
 test('JSON malformado e corpo ausente produzem erro JSON compreensível', async function verificarCorpo() {
@@ -889,7 +1933,7 @@ test('falha do banco vira 500 sem vazar detalhes, SQL ou senha', async function 
     const resultado = await requisitar('/auth/login', { metodo: 'POST', dados: { email: usuarios[0].email, senha: senhaTeste } });
     assert.equal(resultado.status, 500);
     assert.equal(JSON.stringify(resultado.dados).includes('Detalhe interno'), false);
-    assert.equal((await requisitar('/produtos', { token: criarToken(1) })).status, 500);
+    assert.equal((await requisitar('/animais', { token: criarToken(1) })).status, 500);
   } finally {
     pool.execute = executarEmMemoria;
   }
@@ -897,9 +1941,10 @@ test('falha do banco vira 500 sem vazar detalhes, SQL ou senha', async function 
 ```
 
 
-### loja-jwt/backend/tests/mysql.integration.test.js
+### petmatch/backend/tests/mysql.integration.test.js
 
 ```js
+
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
@@ -909,27 +1954,28 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import net from 'node:net';
 import mysql from 'mysql2/promise';
-import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
 
-// OPT-IN: este teste inicia outro mysqld e cria seus próprios dados descartáveis.
-// Não utiliza backend/.env, credenciais reais, porta 3306 ou o serviço MySQL instalado.
-// PowerShell: $env:MYSQL_INTEGRATION='1'; $env:MYSQLD_PATH='C:\Program Files\MySQL\MySQL Server 8.0\bin\mysqld.exe'
-// Em seguida: node --test backend/tests/mysql.integration.test.js
+// Execute somente quando quiser testar a integração com um MySQL descartável.
+// PowerShell:
+// $env:MYSQL_INTEGRATION='1'
+// $env:MYSQLD_PATH='C:\Program Files\MySQL\MySQL Server 8.0\bin\mysqld.exe'
+// node --test backend/tests/mysql.integration.test.js
 const habilitado = process.env.MYSQL_INTEGRATION === '1';
 const raiz = fileURLToPath(new URL('../../', import.meta.url));
+const nomeBanco = 'petmatch_db';
 
 function esperar(ms) {
-  return new Promise(function agendar(resolve) { setTimeout(resolve, ms); });
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function portaDisponivel(preferida = 0) {
-  return new Promise(function verificar(resolve, reject) {
+function portaDisponivel() {
+  return new Promise((resolve, reject) => {
     const servidor = net.createServer();
-    servidor.on('error', reject);
-    servidor.listen(preferida, '127.0.0.1', function lerPorta() {
+    servidor.once('error', reject);
+    servidor.listen(0, '127.0.0.1', () => {
       const porta = servidor.address().port;
-      servidor.close(function liberar() { resolve(porta); });
+      servidor.close(() => resolve(porta));
     });
   });
 }
@@ -941,252 +1987,287 @@ function iniciar(comando, argumentos, ambiente = process.env) {
     windowsHide: true,
     stdio: ['ignore', 'pipe', 'pipe'],
   });
+
   let saida = '';
   let erro = '';
-  filho.stdout.on('data', function capturar(dados) { saida += dados.toString(); });
-  filho.stderr.on('data', function capturar(dados) { erro += dados.toString(); });
-  const terminou = new Promise(function acompanhar(resolve, reject) {
+  filho.stdout.on('data', (dados) => { saida += dados.toString(); });
+  filho.stderr.on('data', (dados) => { erro += dados.toString(); });
+
+  const terminou = new Promise((resolve, reject) => {
     filho.once('error', reject);
-    filho.once('exit', function finalizar(codigo) { resolve({ codigo, saida, erro }); });
+    filho.once('exit', (codigo) => resolve({ codigo, saida, erro }));
   });
-  // O chamador aguarda terminou no momento apropriado, inclusive se o processo falhar cedo.
-  terminou.catch(function observarFalha() {});
+  terminou.catch(() => {});
   return { filho, terminou };
 }
 
 async function encerrar(processo) {
-  if (processo && processo.filho.exitCode === null) {
+  if (processo?.filho && processo.filho.exitCode === null) {
     processo.filho.kill();
-    await processo.terminou.catch(function ignorarFalha() {});
+    await Promise.race([processo.terminou.catch(() => {}), esperar(5000)]);
   }
 }
 
-test('MySQL real isolado: SQL, administrador, autenticação, permissões e CRUD HTTP', { skip: !habilitado, timeout: 120000 }, async function validarMySQL() {
-  assert.ok(process.env.MYSQLD_PATH, 'Defina MYSQLD_PATH com o caminho do binário mysqld.');
+test('PetMatch: autenticação, permissões, animais, favoritos e adoções', {
+  skip: !habilitado,
+  timeout: 120000,
+}, async () => {
+  assert.ok(process.env.MYSQLD_PATH, 'Informe MYSQLD_PATH com o caminho do mysqld.exe.');
+
   const binario = resolve(process.env.MYSQLD_PATH);
+  const basedir = dirname(dirname(binario));
   const pastaValidacao = resolve(raiz, '..', '.mysql-validation');
   await mkdir(pastaValidacao, { recursive: true });
-  const execucao = await mkdtemp(join(pastaValidacao, 'run-'));
+  const execucao = await mkdtemp(join(pastaValidacao, 'petmatch-'));
   const dados = join(execucao, 'data');
   const log = join(execucao, 'mysql.log');
   await mkdir(dados);
-  const basedir = dirname(dirname(binario));
+
   let banco;
   let api;
   let conexao;
-  let sucesso = false;
+  let passou = false;
   const resultados = [];
 
   try {
-    // --no-defaults deve ser o primeiro argumento: nenhum my.ini do serviço será lido.
-    const inicializacao = iniciar(binario, ['--no-defaults', '--initialize-insecure', '--basedir=' + basedir, '--datadir=' + dados, '--log-error=' + log]);
-    const inicializado = await inicializacao.terminou;
-    await writeFile(join(execucao, 'inicializacao.log'), inicializado.saida + inicializado.erro);
-    assert.equal(inicializado.codigo, 0, 'A inicialização isolada falhou; confira os logs em .mysql-validation.');
+    const inicializacao = await iniciar(binario, [
+      '--no-defaults', '--initialize-insecure',
+      '--basedir=' + basedir,
+      '--datadir=' + dados,
+      '--log-error=' + log,
+    ]).terminou;
+    assert.equal(inicializacao.codigo, 0, 'Falha ao inicializar o MySQL temporário.');
 
-    let portaBanco;
-    try { portaBanco = await portaDisponivel(33307); } catch { portaBanco = await portaDisponivel(); }
+    const portaBanco = await portaDisponivel();
     assert.notEqual(portaBanco, 3306);
+
     const argumentosBanco = [
-      '--no-defaults', '--basedir=' + basedir, '--datadir=' + dados,
-      '--log-error=' + log, '--bind-address=127.0.0.1', '--port=' + portaBanco,
-      '--mysqlx=OFF', '--skip-log-bin',
+      '--no-defaults',
+      '--basedir=' + basedir,
+      '--datadir=' + dados,
+      '--log-error=' + log,
+      '--bind-address=127.0.0.1',
+      '--port=' + portaBanco,
+      '--mysqlx=OFF',
+      '--skip-log-bin',
     ];
-    // MySQL no Windows cria um monitor por padrão. Sem monitor, kill também encerra
-    // o servidor real se a conexão falhar antes de conseguirmos executar SHUTDOWN.
     if (process.platform === 'win32') argumentosBanco.push('--no-monitor');
     banco = iniciar(binario, argumentosBanco);
 
-    let codigoConexao;
     for (let tentativa = 0; tentativa < 100; tentativa += 1) {
-      if (banco.filho.exitCode !== null) assert.fail('O mysqld isolado encerrou antes de aceitar conexões.');
+      if (banco.filho.exitCode !== null) {
+        assert.fail('O MySQL temporário encerrou antes de iniciar.');
+      }
       try {
-        conexao = await mysql.createConnection({ host: '127.0.0.1', port: portaBanco, user: 'root', password: '', multipleStatements: true, connectTimeout: 500 });
+        conexao = await mysql.createConnection({
+          host: '127.0.0.1', port: portaBanco,
+          user: 'root', password: '',
+          multipleStatements: true, connectTimeout: 500,
+        });
         break;
-      } catch (erro) {
-        codigoConexao = erro.code;
+      } catch {
         await esperar(200);
       }
     }
-    assert.ok(conexao, 'O mysqld isolado não ficou pronto no prazo esperado. Código: ' + codigoConexao);
-    const sqlInicial = await readFile(join(raiz, 'database', 'loja_jwt.sql'), 'utf8');
-    await conexao.query(sqlInicial);
-    const [contagem] = await conexao.query('SELECT COUNT(*) AS quantidade FROM loja_jwt.produtos');
-    assert.equal(contagem[0].quantidade, 6);
-    const demonstracao = [
-      { email: 'usuario@loja.com', senha: 'Usuario@123', nivel: 'usuario' },
-      { email: 'admin@loja.com', senha: 'Admin@123', nivel: 'admin' },
-    ];
-    const [contasIniciais] = await conexao.query('SELECT id, nome, email, senha, nivel FROM loja_jwt.usuarios');
-    assert.equal(contasIniciais.length, 2);
-    for (const contaDemo of demonstracao) {
-      const encontrada = contasIniciais.find(function buscar(usuario) { return usuario.email === contaDemo.email; });
-      assert.ok(encontrada);
-      assert.equal(encontrada.nivel, contaDemo.nivel);
-      assert.equal(bcrypt.getRounds(encontrada.senha), 10);
-      assert.equal(await bcrypt.compare(contaDemo.senha, encontrada.senha), true);
+    assert.ok(conexao, 'O MySQL temporário não iniciou a tempo.');
+
+    // Usar o SQL entregue somente na instância descartável.
+    await conexao.query(await readFile(join(raiz, 'database', 'petmatch.sql'), 'utf8'));
+    resultados.push('Banco temporário PetMatch criado com quatro tabelas.');
+
+    const senhaAdmin = randomBytes(16).toString('hex');
+    const senhaOng = randomBytes(16).toString('hex');
+    const senhaProtetor = randomBytes(16).toString('hex');
+
+    async function inserirUsuario(nome, email, senha, nivel) {
+      const hash = await bcrypt.hash(senha, 10);
+      const [resultado] = await conexao.execute(
+        'INSERT INTO petmatch_db.usuarios (nome, email, senha, nivel) VALUES (?, ?, ?, ?)',
+        [nome, email, hash, nivel]
+      );
+      return resultado.insertId;
     }
-    // Uma conta já usada mantém nome, senha e nível mesmo se o SQL for reimportado.
-    const adminInicial = contasIniciais.find(function buscar(usuario) { return usuario.email === 'admin@loja.com'; });
-    const senhaAlterada = await bcrypt.hash(randomBytes(16).toString('hex'), 10);
-    await conexao.execute('UPDATE loja_jwt.usuarios SET nome = ?, senha = ?, nivel = ? WHERE id = ?', ['Conta existente preservada', senhaAlterada, 'usuario', adminInicial.id]);
-    await conexao.query(sqlInicial);
-    const [recontagem] = await conexao.query('SELECT COUNT(*) AS quantidade FROM loja_jwt.produtos');
-    assert.equal(recontagem[0].quantidade, 6);
-    const [contasReimportadas] = await conexao.query('SELECT id, nome, email, senha, nivel FROM loja_jwt.usuarios');
-    assert.equal(contasReimportadas.length, 2);
-    for (const original of contasIniciais) {
-      const encontrada = contasReimportadas.find(function buscar(usuario) { return usuario.email === original.email; });
-      assert.ok(encontrada);
-      assert.equal(encontrada.id, original.id);
-      assert.equal(encontrada.nome, original.id === adminInicial.id ? 'Conta existente preservada' : original.nome);
-      assert.equal(encontrada.senha, original.id === adminInicial.id ? senhaAlterada : original.senha);
-      assert.equal(encontrada.nivel, original.id === adminInicial.id ? 'usuario' : original.nivel);
-    }
-    // Restaurar apenas nesta instância descartável para testar os dois logins demonstrativos.
-    await conexao.execute('UPDATE loja_jwt.usuarios SET nome = ?, senha = ?, nivel = ? WHERE id = ?', [adminInicial.nome, adminInicial.senha, adminInicial.nivel, adminInicial.id]);
-    resultados.push('SQL real importado duas vezes: 6 produtos e 2 usuários demonstrativos, sem duplicidade; hashes bcrypt custo 10 válidos.');
-    resultados.push('Reimportação preservou ID, nome, senha e nível das contas existentes, incluindo uma conta alterada.');
+
+    const adminId = await inserirUsuario('Admin PetMatch', 'admin@example.test', senhaAdmin, 'admin');
+    await inserirUsuario('ONG PetMatch', 'ong@example.test', senhaOng, 'ong');
+    await inserirUsuario('Protetor PetMatch', 'protetor@example.test', senhaProtetor, 'protetor');
 
     const portaApi = await portaDisponivel();
     const ambiente = {
       ...process.env,
-      DB_HOST: '127.0.0.1', DB_PORT: String(portaBanco), DB_USER: 'root', DB_PASSWORD: '', DB_NAME: 'loja_jwt',
-      PORT: String(portaApi), JWT_SECRET: randomBytes(48).toString('hex'),
-      ADMIN_NOME: 'Administrador de integração', ADMIN_EMAIL: 'admin.integration@example.test', ADMIN_SENHA: randomBytes(16).toString('hex'),
+      DB_HOST: '127.0.0.1',
+      DB_PORT: String(portaBanco),
+      DB_USER: 'root',
+      DB_PASSWORD: '',
+      DB_NAME: nomeBanco,
+      PORT: String(portaApi),
+      JWT_SECRET: randomBytes(48).toString('hex'),
     };
-    const adminCriado = await iniciar(process.execPath, ['backend/scripts/criarAdmin.js'], ambiente).terminou;
-    assert.equal(adminCriado.codigo, 0);
-    assert.equal(adminCriado.saida.includes('Administrador criado com sucesso'), true);
-    const adminRepetido = await iniciar(process.execPath, ['backend/scripts/criarAdmin.js'], ambiente).terminou;
-    assert.equal(adminRepetido.codigo, 0);
-    assert.equal(adminRepetido.saida.includes('Administrador já cadastrado'), true);
-    resultados.push('Script criarAdmin executado duas vezes: criado, depois já cadastrado.');
 
     api = iniciar(process.execPath, ['backend/server.js'], ambiente);
     const endereco = 'http://127.0.0.1:' + portaApi;
+
     let apiPronta = false;
     for (let tentativa = 0; tentativa < 100; tentativa += 1) {
-      if (api.filho.exitCode !== null) assert.fail('A API isolada encerrou antes de aceitar conexões.');
+      if (api.filho.exitCode !== null) {
+        assert.fail('A API encerrou antes de iniciar.');
+      }
       try {
         const resposta = await fetch(endereco);
-        if (resposta.status === 200) { apiPronta = true; break; }
+        if (resposta.status === 200) {
+          apiPronta = true;
+          break;
+        }
       } catch {}
       await esperar(100);
     }
-    assert.equal(apiPronta, true, 'A API isolada não ficou pronta.');
+    assert.ok(apiPronta, 'A API não iniciou a tempo.');
 
     async function requisitar(caminho, metodo = 'GET', token, corpo) {
       const headers = {};
       if (token) headers.Authorization = 'Bearer ' + token;
       if (corpo !== undefined) headers['Content-Type'] = 'application/json';
-      const resposta = await fetch(endereco + caminho, { method: metodo, headers, body: corpo === undefined ? undefined : JSON.stringify(corpo) });
-      return { status: resposta.status, dados: await resposta.json() };
+      const resposta = await fetch(endereco + caminho, {
+        method: metodo,
+        headers,
+        body: corpo === undefined ? undefined : JSON.stringify(corpo),
+      });
+      const texto = await resposta.text();
+      let dados;
+      try { dados = JSON.parse(texto); } catch { dados = texto; }
+      return { status: resposta.status, dados };
     }
 
-    assert.equal((await requisitar('/produtos')).status, 401);
-    for (const contaDemo of demonstracao) {
-      const loginDemo = await requisitar('/auth/login', 'POST', undefined, { email: contaDemo.email, senha: contaDemo.senha });
-      assert.equal(loginDemo.status, 200);
-      assert.equal(loginDemo.dados.usuario.nivel, contaDemo.nivel);
-      assert.equal('senha' in loginDemo.dados.usuario, false);
-      const tokenDemo = loginDemo.dados.token;
-      const perfilDemo = await requisitar('/auth/me', 'GET', tokenDemo);
-      assert.equal(perfilDemo.status, 200);
-      assert.equal(perfilDemo.dados.nivel, contaDemo.nivel);
-      assert.equal((await requisitar('/produtos', 'GET', tokenDemo)).status, 200);
-      if (contaDemo.nivel === 'usuario') {
-        assert.equal((await requisitar('/produtos', 'POST', tokenDemo, {})).status, 403);
-        assert.equal((await requisitar('/usuarios', 'GET', tokenDemo)).status, 403);
-      } else {
-        const produtoDemo = await requisitar('/produtos', 'POST', tokenDemo, { nome: 'Produto do administrador demonstrativo', descricao: 'Validação do INSERT de usuários', categoria: 'Testes', preco: 10, estoque: 1 });
-        assert.equal(produtoDemo.status, 201);
-        assert.equal((await requisitar('/produtos/' + produtoDemo.dados.produto.id, 'DELETE', tokenDemo)).status, 200);
-        assert.equal((await requisitar('/usuarios', 'GET', tokenDemo)).status, 200);
-      }
+    async function autenticar(email, senha, nivel) {
+      const resposta = await requisitar('/auth/login', 'POST', undefined, { email, senha });
+      assert.equal(resposta.status, 200, `Login de ${nivel}: ${JSON.stringify(resposta.dados)}`);
+      assert.equal(resposta.dados.usuario.nivel, nivel);
+      assert.equal('senha' in resposta.dados.usuario, false);
+      assert.ok(resposta.dados.token);
+      return resposta.dados.token;
     }
-    resultados.push('Contas do SQL: ambos os logins e /auth/me válidos; usuário consulta e recebe 403 na administração; admin cria/exclui produto e lista usuários.');
-    const senhaUsuario = randomBytes(16).toString('hex');
-    const conta = { nome: 'Estudante de integração', email: 'estudante.integration@example.test', senha: senhaUsuario, nivel: 'admin' };
-    const cadastro = await requisitar('/auth/cadastro', 'POST', undefined, conta);
-    assert.equal(cadastro.status, 201);
-    assert.equal(cadastro.dados.usuario.nivel, 'usuario');
+
+    const tokenAdmin = await autenticar('admin@example.test', senhaAdmin, 'admin');
+    const tokenOng = await autenticar('ong@example.test', senhaOng, 'ong');
+    const tokenProtetor = await autenticar('protetor@example.test', senhaProtetor, 'protetor');
+
+    const senhaAdotante = randomBytes(16).toString('hex');
+    const cadastro = await requisitar('/auth/cadastro', 'POST', undefined, {
+      nome: 'Adotante de teste',
+      email: 'adotante@example.test',
+      senha: senhaAdotante,
+      nivel: 'admin',
+    });
+    assert.equal(cadastro.status, 201, JSON.stringify(cadastro.dados));
+    assert.equal(cadastro.dados.usuario.nivel, 'adotante');
     assert.equal('senha' in cadastro.dados.usuario, false);
-    assert.equal((await requisitar('/auth/cadastro', 'POST', undefined, conta)).status, 409);
-    assert.equal((await requisitar('/auth/login', 'POST', undefined, { email: conta.email, senha: randomBytes(16).toString('hex') })).status, 401);
-    const loginUsuario = await requisitar('/auth/login', 'POST', undefined, { email: conta.email, senha: senhaUsuario });
-    assert.equal(loginUsuario.status, 200);
-    const tokenUsuario = loginUsuario.dados.token;
-    const payload = jwt.verify(tokenUsuario, ambiente.JWT_SECRET);
-    assert.equal(payload.exp - payload.iat, 7200);
-    assert.equal('senha' in payload, false);
-    assert.equal('senha' in loginUsuario.dados.usuario, false);
-    assert.equal((await requisitar('/auth/me', 'GET', tokenUsuario)).dados.id, cadastro.dados.usuario.id);
-    assert.equal((await requisitar('/produtos', 'GET', tokenUsuario)).status, 200);
-    assert.equal((await requisitar('/produtos', 'POST', tokenUsuario, {})).status, 403);
-    assert.equal((await requisitar('/usuarios', 'GET', tokenUsuario)).status, 403);
-    resultados.push('Cadastro ignora admin, duplicado 409, login inválido 401, JWT 2h sem senha, /me válido.');
-    resultados.push('Matriz real: sem token 401; usuário consulta 200 e administração 403.');
+    assert.equal((await requisitar('/auth/cadastro', 'POST', undefined, {
+      nome: 'Adotante de teste', email: 'adotante@example.test', senha: senhaAdotante,
+    })).status, 409);
 
-    const loginAdmin = await requisitar('/auth/login', 'POST', undefined, { email: ambiente.ADMIN_EMAIL, senha: ambiente.ADMIN_SENHA });
-    assert.equal(loginAdmin.status, 200);
-    const tokenAdmin = loginAdmin.dados.token;
-    const produto = { nome: 'Produto de integração', descricao: 'Teste real de SQL parametrizado', categoria: 'Testes', preco: 199.90, estoque: 3 };
-    const criado = await requisitar('/produtos', 'POST', tokenAdmin, produto);
-    assert.equal(criado.status, 201);
-    const id = criado.dados.produto.id;
-    assert.equal((await requisitar('/produtos/' + id, 'GET', tokenAdmin)).dados.nome, produto.nome);
-    const alterado = await requisitar('/produtos/' + id, 'PUT', tokenAdmin, { ...produto, preco: 179.90, estoque: 2 });
-    assert.equal(alterado.status, 200);
-    assert.equal((await requisitar('/produtos/' + id, 'GET', tokenAdmin)).dados.preco, 179.90);
-    // Repetir a mesma atualização também deve retornar sucesso.
-    assert.equal((await requisitar('/produtos/' + id, 'PUT', tokenAdmin, { ...produto, preco: 179.90, estoque: 2 })).status, 200);
-    assert.equal((await requisitar('/produtos/' + id, 'DELETE', tokenAdmin)).status, 200);
-    assert.equal((await requisitar('/produtos/' + id, 'GET', tokenAdmin)).status, 404);
-    resultados.push('Administrador: POST 201, GET 200, PUT 200 (incluindo sem mudanças), DELETE 200 e depois 404.');
+    const tokenAdotante = await autenticar('adotante@example.test', senhaAdotante, 'adotante');
+    const perfil = await requisitar('/auth/me', 'GET', tokenAdotante);
+    assert.equal(perfil.status, 200);
+    assert.equal(perfil.dados.nivel, 'adotante');
+    assert.equal((await requisitar('/usuarios', 'GET', tokenAdotante)).status, 403);
+    assert.equal((await requisitar('/usuarios', 'GET', tokenAdmin)).status, 200);
+    assert.equal((await requisitar('/usuarios/' + adminId + '/nivel', 'PUT', tokenAdmin, {
+      nivel: 'adotante',
+    })).status, 400);
+    resultados.push('Cadastro, login, JWT, perfil e permissões de administrador validados.');
 
-    const lista = await requisitar('/usuarios', 'GET', tokenAdmin);
-    assert.equal(lista.status, 200);
-    for (const usuario of lista.dados) assert.equal('senha' in usuario, false);
-    assert.equal((await requisitar('/usuarios/' + loginAdmin.dados.usuario.id + '/nivel', 'PUT', tokenAdmin, { nivel: 'usuario' })).status, 400);
-    const alvo = cadastro.dados.usuario.id;
-    assert.equal((await requisitar('/usuarios/' + alvo + '/nivel', 'PUT', tokenAdmin, { nivel: 'invalido' })).status, 400);
-    assert.equal((await requisitar('/usuarios/' + alvo + '/nivel', 'PUT', tokenAdmin, { nivel: 'admin' })).status, 200);
-    assert.equal((await requisitar('/auth/me', 'GET', tokenUsuario)).dados.nivel, 'admin');
-    assert.equal((await requisitar('/usuarios', 'GET', tokenUsuario)).status, 200);
-    assert.equal((await requisitar('/usuarios/' + alvo + '/nivel', 'PUT', tokenAdmin, { nivel: 'usuario' })).status, 200);
-    assert.equal((await requisitar('/usuarios', 'GET', tokenUsuario)).status, 403);
-    const [hashes] = await conexao.execute('SELECT senha FROM loja_jwt.usuarios WHERE id = ?', [alvo]);
-    assert.equal(hashes[0].senha.startsWith('$2'), true);
-    assert.notEqual(hashes[0].senha, senhaUsuario);
-    resultados.push('Usuários: listagem sem senha, próprio nível 400, nível inválido 400, promoção e rebaixamento imediatos.');
-    sucesso = true;
+    const animal = {
+      nome: 'Luna', especie: 'Cachorro', raca: 'Sem raça definida',
+      idade: 2, unidade_idade: 'anos', porte: 'Médio', sexo: 'Fêmea',
+      cidade: 'Santa Cruz do Sul', descricao: 'Animal para teste de adoção.',
+      saude: 'Vacinada', foto: 'https://example.test/luna.jpg',
+    };
+
+    assert.equal((await requisitar('/animais', 'POST', tokenAdotante, animal)).status, 403);
+    const criado = await requisitar('/animais', 'POST', tokenOng, animal);
+    assert.equal(criado.status, 201, JSON.stringify(criado.dados));
+    const animalId = criado.dados.animal?.id ?? criado.dados.id;
+    assert.ok(Number.isSafeInteger(Number(animalId)), 'O cadastro deve retornar o ID do animal.');
+
+    const consulta = await requisitar('/animais/' + animalId, 'GET', tokenAdotante);
+    assert.equal(consulta.status, 200);
+    assert.equal(consulta.dados.animal?.nome ?? consulta.dados.nome, 'Luna');
+    assert.equal((await requisitar('/animais', 'POST', tokenAdotante, animal)).status, 403);
+
+    const alterado = await requisitar('/animais/' + animalId, 'PUT', tokenOng, {
+      ...animal, nome: 'Luna atualizada',
+    });
+    assert.equal(alterado.status, 200, JSON.stringify(alterado.dados));
+    assert.equal((await requisitar('/animais/' + animalId, 'PUT', tokenProtetor, animal)).status, 403);
+    assert.equal((await requisitar('/animais/' + animalId, 'DELETE', tokenProtetor)).status, 403);
+    const outroAnimal = await requisitar('/animais', 'POST', tokenProtetor, { ...animal, nome: 'Pet do protetor' });
+    assert.equal(outroAnimal.status, 201);
+    const outroId = outroAnimal.dados.animal.id;
+    assert.equal((await requisitar('/animais/' + outroId, 'DELETE', tokenProtetor)).status, 200);
+    assert.equal((await requisitar('/animais/' + outroId, 'GET', tokenAdotante)).status, 404);
+    resultados.push('CRUD e propriedade de animais por ONG e protetor validados.');
+
+    const favorito = await requisitar('/favoritos', 'POST', tokenAdotante, { animal_id: animalId });
+    assert.equal(favorito.status, 201, JSON.stringify(favorito.dados));
+    assert.equal((await requisitar('/favoritos', 'POST', tokenAdotante, {
+      animal_id: animalId,
+    })).status, 409);
+    const favoritos = await requisitar('/favoritos', 'GET', tokenAdotante);
+    assert.equal(favoritos.status, 200);
+    assert.ok(Array.isArray(favoritos.dados));
+    assert.ok(favoritos.dados.some((item) => Number(item.animal_id) === Number(animalId)));
+    assert.equal((await requisitar('/favoritos/' + animalId, 'DELETE', tokenAdotante)).status, 200);
+    resultados.push('Favoritos: adicionar, impedir duplicidade, listar e remover.');
+
+    assert.equal((await requisitar('/adocoes', 'POST', tokenOng, {
+      animal_id: animalId, mensagem: 'Quero adotar.',
+    })).status, 403);
+    const pedido = await requisitar('/adocoes', 'POST', tokenAdotante, {
+      animal_id: animalId, mensagem: 'Gostaria de conhecer a Luna.',
+    });
+    assert.equal(pedido.status, 201, JSON.stringify(pedido.dados));
+    const adocaoId = pedido.dados.adocao?.id ?? pedido.dados.id;
+    assert.ok(Number.isSafeInteger(Number(adocaoId)));
+    assert.equal((await requisitar('/adocoes', 'POST', tokenAdotante, {
+      animal_id: animalId,
+    })).status, 409);
+    assert.equal((await requisitar('/adocoes', 'GET', tokenAdotante)).status, 200);
+    assert.equal((await requisitar('/adocoes/' + adocaoId + '/status', 'PUT', tokenProtetor, {
+      status: 'aprovada',
+    })).status, 403);
+    assert.equal((await requisitar('/adocoes/' + adocaoId + '/status', 'PUT', tokenOng, {
+      status: 'aprovada',
+    })).status, 200);
+
+    const [situacao] = await conexao.execute(
+      'SELECT status FROM petmatch_db.animais WHERE id = ?', [animalId]
+    );
+    assert.equal(situacao[0].status, 'adotado');
+    resultados.push('Adoção: solicitar, impedir duplicidade, verificar responsável e aprovar.');
+
+    passou = true;
   } finally {
     await encerrar(api);
     if (conexao) {
-      // SHUTDOWN só atinge a conexão com a instância criada por este teste.
       try { await conexao.query('SHUTDOWN'); } catch {}
       try { await conexao.end(); } catch {}
     }
     if (banco) {
-      await Promise.race([banco.terminou.catch(function observar() {}), esperar(5000)]);
+      await Promise.race([banco.terminou.catch(() => {}), esperar(5000)]);
       await encerrar(banco);
     }
     await writeFile(join(execucao, 'resultado.txt'), [
-      'Validação MySQL real isolada: ' + (sucesso ? 'PASSOU' : 'FALHOU'),
-      'Instância com --no-defaults, dados próprios, bind 127.0.0.1 e porta diferente de 3306.',
-      'Segredo JWT e credenciais das contas adicionais gerados somente em memória; tokens e hashes não registrados.',
-      'As duas contas demonstrativas do SQL usam as credenciais públicas documentadas para a aula.',
+      'Teste de integração PetMatch: ' + (passou ? 'PASSOU' : 'FALHOU'),
+      'Banco temporário isolado, sem acessar o MySQL principal.',
       ...resultados,
-      'Processos filhos da API e do MySQL encerrados ao final.',
     ].join('\n') + '\n');
-    console.log('Evidência da integração isolada: ' + join(execucao, 'resultado.txt'));
+    console.log('Resultado salvo em: ' + join(execucao, 'resultado.txt'));
   }
 });
 ```
 
 
-### loja-jwt/backend/utils/validacoes.js
+### petmatch/backend/utils/validacoes.js
 
 ```js
 // Front-end e back-end validam os dados: qualquer pessoa pode chamar a API diretamente.
@@ -1202,109 +2283,121 @@ export function senhaValida(senha) {
 export function idValido(id) {
   return /^\d+$/.test(String(id)) && Number.isSafeInteger(Number(id)) && Number(id) > 0 && Number(id) <= 2147483647;
 }
-
-export function validarProduto(dados) {
-  if (typeof dados.nome !== 'string' || !dados.nome.trim() || dados.nome.trim().length > 120) {
-    return 'Informe um nome de produto com até 120 caracteres.';
-  }
-
-  if (dados.descricao !== undefined && (typeof dados.descricao !== 'string' || dados.descricao.trim().length > 500)) {
-    return 'A descrição deve ter até 500 caracteres.';
-  }
-
-  if (dados.categoria !== undefined && (typeof dados.categoria !== 'string' || dados.categoria.trim().length > 100)) {
-    return 'A categoria deve ter até 100 caracteres.';
-  }
-
-  // Não aceitar vazio, booleanos, NaN ou números fora dos limites de DECIMAL(10,2).
-  const preco = String(dados.preco);
-  if (!['number', 'string'].includes(typeof dados.preco) || !/^\d+(\.\d{1,2})?$/.test(preco) || Number(preco) > 99999999.99) {
-    return 'Informe um preço de 0 a 99999999.99, com no máximo duas casas decimais.';
-  }
-
-  const estoque = String(dados.estoque);
-  if (!['number', 'string'].includes(typeof dados.estoque) || !/^\d+$/.test(estoque) || !Number.isInteger(Number(estoque)) || Number(estoque) > 2147483647) {
-    return 'Informe um estoque inteiro de 0 a 2147483647.';
-  }
-
-  return null;
-}
 ```
 
 
-### loja-jwt/backend/.env.example
-
-```dotenv
-# Copie este arquivo para backend/.env e preencha seus próprios valores.
-# Nunca envie backend/.env para Git. Este modelo não contém credenciais reais.
-JWT_SECRET=COLOQUE_UMA_CHAVE_FORTE_AQUI
-PORT=3000
-
-DB_HOST=localhost
-DB_PORT=3306
-DB_USER=root
-DB_PASSWORD=
-DB_NAME=loja_jwt
-
-ADMIN_NOME=Administrador
-ADMIN_EMAIL=admin.professor@loja.com
-ADMIN_SENHA=DEFINA_UMA_SENHA_FORTE
-```
-
-
-### loja-jwt/backend/app.js
+### petmatch/backend/app.js
 
 ```js
+
 import './config/ambiente.js';
+
 import express from 'express';
 import cors from 'cors';
+
 import authRoutes from './routes/authRoutes.js';
-import produtosRoutes from './routes/produtosRoutes.js';
+import animaisRoutes from './routes/animaisRoutes.js';
 import usuariosRoutes from './routes/usuariosRoutes.js';
+import adocoesRoutes from './routes/adocoesRoutes.js';
+import favoritosRoutes from './routes/favoritosRoutes.js';
 
 const app = express();
+
 app.disable('x-powered-by');
-// CORS permite usar o Expo Web em outra porta. Ele não substitui autenticação.
+
+// PERMITIR REQUISIÇÕES DO APLICATIVO
+// CORS É NECESSÁRIO PRINCIPALMENTE PARA O EXPO WEB
 app.use(cors());
+
+// RECEBER DADOS EM FORMATO JSON
 app.use(express.json({ limit: '10kb' }));
-// Respostas com token ou dados pessoais não devem ser guardadas em caches HTTP.
+
+// IMPEDIR CACHE DE INFORMAÇÕES SENSÍVEIS
 app.use(function impedirCache(req, res, next) {
   res.setHeader('Cache-Control', 'no-store');
-  // Uma requisição sem JSON continua tendo um objeto seguro para validação nos controllers.
-  if (!req.body || typeof req.body !== 'object' || Array.isArray(req.body)) {
+
+  // GARANTIR UM OBJETO SEGURO PARA VALIDAÇÃO
+  if (
+    !req.body ||
+    typeof req.body !== 'object' ||
+    Array.isArray(req.body)
+  ) {
     req.body = {};
   }
+
   next();
 });
 
+// ROTA INICIAL DA API
 app.get('/', function apresentarApi(req, res) {
-  res.json({ mensagem: 'API LOJA JWT', rotas: ['/auth', '/produtos', '/usuarios'] });
+  res.json({
+    mensagem: 'API PETMATCH',
+    descricao: 'Sistema de adoção responsável de animais',
+    rotas: [
+      '/auth',
+      '/animais',
+      '/usuarios',
+      '/adocoes',
+      '/favoritos',
+    ],
+  });
 });
+
+// ROTAS DE AUTENTICAÇÃO
 app.use('/auth', authRoutes);
-app.use('/produtos', produtosRoutes);
+
+// ROTAS DOS ANIMAIS
+// CADASTRAR, LISTAR, EDITAR E EXCLUIR
+app.use('/animais', animaisRoutes);
+
+// ROTAS DE USUÁRIOS
+// GERENCIAMENTO DE CONTAS E PERMISSÕES
 app.use('/usuarios', usuariosRoutes);
 
+// ROTAS DE ADOÇÃO
+// ENVIAR E ACOMPANHAR SOLICITAÇÕES
+app.use('/adocoes', adocoesRoutes);
+
+// ROTAS DE FAVORITOS
+// SALVAR ANIMAIS DE INTERESSE
+app.use('/favoritos', favoritosRoutes);
+
+// ROTA NÃO ENCONTRADA
 app.use(function rotaNaoEncontrada(req, res) {
-  res.status(404).json({ mensagem: 'Rota não encontrada.' });
+  res.status(404).json({
+    mensagem: 'Rota não encontrada.',
+  });
 });
 
-// Quatro parâmetros identificam um tratador de erros do Express.
+// TRATAMENTO DE ERROS DA API
 app.use(function tratarErro(erro, req, res, next) {
+  // JSON INVÁLIDO
   if (erro.type === 'entity.parse.failed') {
-    return res.status(400).json({ mensagem: 'JSON inválido no corpo da requisição.' });
+    return res.status(400).json({
+      mensagem: 'JSON inválido no corpo da requisição.',
+    });
   }
+
+  // REQUISIÇÃO MUITO GRANDE
   if (erro.type === 'entity.too.large') {
-    return res.status(413).json({ mensagem: 'Corpo da requisição muito grande.' });
+    return res.status(413).json({
+      mensagem: 'Corpo da requisição muito grande.',
+    });
   }
-  // Não devolver SQL, credenciais, stack trace ou mensagens internas do banco ao cliente.
-  return res.status(500).json({ mensagem: 'Erro interno do servidor. Tente novamente.' });
+
+  // NÃO EXPOR INFORMAÇÕES INTERNAS DO SERVIDOR
+  console.error('Erro na API:', erro);
+
+  return res.status(500).json({
+    mensagem: 'Erro interno do servidor. Tente novamente.',
+  });
 });
 
 export default app;
 ```
 
 
-### loja-jwt/backend/server.js
+### petmatch/backend/server.js
 
 ```js
 import app from './app.js';
@@ -1329,117 +2422,316 @@ try {
 ```
 
 
-### loja-jwt/components/FormularioProduto.js
+### petmatch/components/FormularioAnimal.js
 
 ```js
+
 import React from 'react';
 import { StyleSheet, Text, View } from 'react-native';
-import { Botao, Campo, cores } from './ui';
+import { Botao, Campo, cores } from './ui.js';
 
-// A validação do aplicativo ajuda o usuário a preencher os campos.
-// A API faz as mesmas verificações: o servidor nunca confia só no formulário.
-export function prepararProduto(campos) {
-  const nome = campos.nome.trim();
-  const descricao = campos.descricao.trim();
-  const categoria = campos.categoria.trim();
-  const textoPreco = campos.preco.trim();
-  const textoEstoque = campos.estoque.trim();
+// VALIDAR E PREPARAR OS DADOS DO ANIMAL
+export function prepararAnimal(campos) {
+  const nome = String(campos.nome || '').trim();
+  const especie = String(campos.especie || '').trim();
+  const raca = String(campos.raca || '').trim();
+  const textoIdade = String(campos.idade || '').trim();
+  const unidade_idade = String(campos.unidade_idade || 'anos').trim();
+  const porte = String(campos.porte || '').trim();
+  const sexo = String(campos.sexo || '').trim();
+  const cidade = String(campos.cidade || '').trim();
+  const descricao = String(campos.descricao || '').trim();
+  const saude = String(campos.saude || '').trim();
+  const foto = String(campos.foto || '').trim();
+  const status = String(campos.status || 'disponivel').trim();
 
+  // VALIDAR NOME
   if (!nome || nome.length > 120) {
-    throw new Error('Informe um nome com até 120 caracteres.');
+    throw new Error(
+      'Informe o nome do animal com até 120 caracteres.'
+    );
   }
 
-  if (descricao.length > 500 || categoria.length > 100) {
-    throw new Error('A descrição aceita até 500 caracteres e a categoria até 100.');
+  // VALIDAR ESPÉCIE
+  if (!['Cachorro', 'Gato'].includes(especie)) {
+    throw new Error(
+      'Informe a espécie: Cachorro ou Gato.'
+    );
   }
 
-  // Aceitamos vírgula ou ponto, com no máximo duas casas decimais.
-  if (!/^\d+(?:[.,]\d{1,2})?$/.test(textoPreco)) {
-    throw new Error('Informe um preço válido. Exemplos: 59,90 ou 59.90.');
+  // VALIDAR RAÇA
+  if (raca.length > 100) {
+    throw new Error(
+      'A raça deve ter no máximo 100 caracteres.'
+    );
   }
 
-  const preco = Number(textoPreco.replace(',', '.'));
-  const estoque = Number(textoEstoque);
-
-  if (!Number.isFinite(preco) || preco < 0 || preco > 99999999.99) {
-    throw new Error('O preço deve ficar entre 0 e 99.999.999,99.');
+  // VALIDAR IDADE
+  if (!/^\d+$/.test(textoIdade)) {
+    throw new Error(
+      'Informe a idade do animal em números inteiros.'
+    );
   }
 
-  // 2.147.483.647 é o maior inteiro aceito pela coluna INT do MySQL.
-  if (!/^\d+$/.test(textoEstoque) || !Number.isInteger(estoque) || estoque > 2147483647) {
-    throw new Error('O estoque deve ser um inteiro entre 0 e 2.147.483.647.');
+  const idade = Number(textoIdade);
+
+  if (!Number.isInteger(idade) || idade < 0 || idade > 300) {
+    throw new Error(
+      'Informe uma idade válida para o animal.'
+    );
   }
 
-  return { nome, descricao, categoria, preco, estoque };
+  if (!['anos', 'meses'].includes(unidade_idade)) {
+    throw new Error(
+      'A unidade da idade deve ser anos ou meses.'
+    );
+  }
+
+  // VALIDAR PORTE
+  if (!['Pequeno', 'Médio', 'Grande'].includes(porte)) {
+    throw new Error(
+      'Informe o porte: Pequeno, Médio ou Grande.'
+    );
+  }
+
+  // VALIDAR SEXO
+  if (!['Macho', 'Fêmea'].includes(sexo)) {
+    throw new Error(
+      'Informe o sexo: Macho ou Fêmea.'
+    );
+  }
+
+  // VALIDAR CIDADE
+  if (!cidade || cidade.length > 120) {
+    throw new Error(
+      'Informe a cidade com até 120 caracteres.'
+    );
+  }
+
+  // VALIDAR DESCRIÇÃO
+  if (descricao.length > 1000) {
+    throw new Error(
+      'A descrição deve ter no máximo 1000 caracteres.'
+    );
+  }
+
+  // VALIDAR SAÚDE
+  if (saude.length > 500) {
+    throw new Error(
+      'As informações de saúde devem ter até 500 caracteres.'
+    );
+  }
+
+  // VALIDAR FOTO
+  if (foto && !/^https?:\/\/\S+$/i.test(foto)) {
+    throw new Error(
+      'Informe um link válido para a foto, começando com http:// ou https://.'
+    );
+  }
+
+  // VALIDAR STATUS
+  if (
+    !['disponivel', 'em_processo', 'adotado'].includes(status)
+  ) {
+    throw new Error(
+      'Informe um status de adoção válido.'
+    );
+  }
+
+  return {
+    nome,
+    especie,
+    raca,
+    idade,
+    unidade_idade,
+    porte,
+    sexo,
+    cidade,
+    descricao,
+    saude,
+    foto,
+    status,
+  };
 }
 
-// Os States ficam nos screens. Este componente apenas apresenta os campos,
-// recebe seus valores por props e avisa o screen quando o texto muda.
-export default function FormularioProduto({ campos, onAlterar, onSalvar, salvando, tituloBotao }) {
+// FORMULÁRIO DE CADASTRO E EDIÇÃO
+export default function FormularioAnimal({
+  campos,
+  onAlterar,
+  onSalvar,
+  salvando,
+  tituloBotao,
+}) {
   return (
     <View style={estilos.formulario}>
+
+      {/* NOME */}
       <Campo
-        rotulo="Nome *"
+        rotulo="Nome do animal *"
         value={campos.nome}
-        onChangeText={function (texto) { onAlterar('nome', texto); }}
+        onChangeText={(texto) => onAlterar('nome', texto)}
         maxLength={120}
-        placeholder="Ex.: Teclado sem fio"
+        placeholder="Ex.: Nina"
         editable={!salvando}
       />
+
+      {/* ESPÉCIE */}
       <Campo
-        rotulo="Descrição"
+        rotulo="Espécie *"
+        value={campos.especie}
+        onChangeText={(texto) => onAlterar('especie', texto)}
+        maxLength={20}
+        placeholder="Cachorro ou Gato"
+        editable={!salvando}
+      />
+
+      {/* RAÇA */}
+      <Campo
+        rotulo="Raça"
+        value={campos.raca}
+        onChangeText={(texto) => onAlterar('raca', texto)}
+        maxLength={100}
+        placeholder="Ex.: Sem raça definida"
+        editable={!salvando}
+      />
+
+      {/* IDADE */}
+      <Campo
+        rotulo="Idade *"
+        value={String(campos.idade ?? '')}
+        onChangeText={(texto) => onAlterar('idade', texto)}
+        keyboardType="number-pad"
+        inputMode="numeric"
+        maxLength={3}
+        placeholder="Ex.: 2"
+        editable={!salvando}
+      />
+
+      {/* UNIDADE DA IDADE */}
+      <Campo
+        rotulo="Unidade da idade *"
+        value={campos.unidade_idade}
+        onChangeText={(texto) =>
+          onAlterar('unidade_idade', texto)
+        }
+        maxLength={5}
+        placeholder="anos ou meses"
+        editable={!salvando}
+      />
+
+      {/* PORTE */}
+      <Campo
+        rotulo="Porte *"
+        value={campos.porte}
+        onChangeText={(texto) => onAlterar('porte', texto)}
+        maxLength={20}
+        placeholder="Pequeno, Médio ou Grande"
+        editable={!salvando}
+      />
+
+      {/* SEXO */}
+      <Campo
+        rotulo="Sexo *"
+        value={campos.sexo}
+        onChangeText={(texto) => onAlterar('sexo', texto)}
+        maxLength={20}
+        placeholder="Macho ou Fêmea"
+        editable={!salvando}
+      />
+
+      {/* CIDADE */}
+      <Campo
+        rotulo="Cidade *"
+        value={campos.cidade}
+        onChangeText={(texto) => onAlterar('cidade', texto)}
+        maxLength={120}
+        placeholder="Ex.: Santa Cruz do Sul"
+        editable={!salvando}
+      />
+
+      {/* DESCRIÇÃO */}
+      <Campo
+        rotulo="Descrição do animal"
         value={campos.descricao}
-        onChangeText={function (texto) { onAlterar('descricao', texto); }}
-        maxLength={500}
+        onChangeText={(texto) =>
+          onAlterar('descricao', texto)
+        }
+        maxLength={1000}
         multiline
         numberOfLines={4}
-        placeholder="Conte um pouco sobre o produto"
+        placeholder="Conte sobre a personalidade, os hábitos e a história do animal."
         editable={!salvando}
         style={estilos.descricao}
       />
+
+      {/* SAÚDE */}
       <Campo
-        rotulo="Categoria"
-        value={campos.categoria}
-        onChangeText={function (texto) { onAlterar('categoria', texto); }}
-        maxLength={100}
-        placeholder="Ex.: Periféricos"
+        rotulo="Saúde e cuidados"
+        value={campos.saude}
+        onChangeText={(texto) => onAlterar('saude', texto)}
+        maxLength={500}
+        multiline
+        numberOfLines={3}
+        placeholder="Ex.: Vacinado, castrado e vermifugado."
+        editable={!salvando}
+        style={estilos.descricao}
+      />
+
+      {/* FOTO */}
+      <Campo
+        rotulo="Link da foto"
+        value={campos.foto}
+        onChangeText={(texto) => onAlterar('foto', texto)}
+        maxLength={1000}
+        placeholder="https://exemplo.com/foto.jpg"
+        autoCapitalize="none"
         editable={!salvando}
       />
+
+      {/* STATUS */}
       <Campo
-        rotulo="Preço (R$) *"
-        value={campos.preco}
-        onChangeText={function (texto) { onAlterar('preco', texto); }}
-        keyboardType="decimal-pad"
-        inputMode="decimal"
-        maxLength={16}
-        placeholder="0,00"
+        rotulo="Status de adoção *"
+        value={campos.status}
+        onChangeText={(texto) => onAlterar('status', texto)}
+        maxLength={20}
+        placeholder="disponivel, em_processo ou adotado"
         editable={!salvando}
       />
-      <Campo
-        rotulo="Estoque *"
-        value={campos.estoque}
-        onChangeText={function (texto) { onAlterar('estoque', texto); }}
-        keyboardType="number-pad"
-        inputMode="numeric"
-        maxLength={10}
-        placeholder="0"
-        editable={!salvando}
+
+      <Text style={estilos.ajuda}>
+        * Campos obrigatórios. Preencha as informações
+        corretamente para facilitar a adoção responsável.
+      </Text>
+
+      <Botao
+        titulo={tituloBotao}
+        onPress={onSalvar}
+        carregando={salvando}
       />
-      <Text style={estilos.ajuda}>* Campos obrigatórios. O preço e o estoque podem ser zero.</Text>
-      <Botao titulo={tituloBotao} onPress={onSalvar} carregando={salvando} />
     </View>
   );
 }
 
 const estilos = StyleSheet.create({
-  formulario: { gap: 12 },
-  descricao: { minHeight: 100, textAlignVertical: 'top' },
-  ajuda: { color: cores.muted, fontSize: 13, lineHeight: 20 },
+  formulario: {
+    gap: 12,
+  },
+
+  descricao: {
+    minHeight: 100,
+    textAlignVertical: 'top',
+  },
+
+  ajuda: {
+    color: cores.muted,
+    fontSize: 13,
+    lineHeight: 20,
+  },
 });
 ```
 
 
-### loja-jwt/components/ui.js
+### petmatch/components/ui.js
 
 ```js
 // Componentes visuais reutilizam Props; não escondem regras da aplicação.
@@ -1528,617 +2820,209 @@ const ui = StyleSheet.create({
 ```
 
 
-### loja-jwt/database/loja_jwt.sql
+### petmatch/database/petmatch.sql
 
 ```sql
--- Execute este arquivo no MySQL Workbench antes de iniciar a API.
--- IF NOT EXISTS evita apagar dados se o arquivo for executado novamente.
-CREATE DATABASE IF NOT EXISTS loja_jwt
+
+-- Banco de dados do PetMatch
+-- Plataforma de adoção responsável de animais
+
+CREATE DATABASE IF NOT EXISTS petmatch_db
   CHARACTER SET utf8mb4
   COLLATE utf8mb4_unicode_ci;
 
-USE loja_jwt;
+USE petmatch_db;
 
+-- Usuários do aplicativo
 CREATE TABLE IF NOT EXISTS usuarios (
   id INT PRIMARY KEY AUTO_INCREMENT,
   nome VARCHAR(100) NOT NULL,
   email VARCHAR(150) NOT NULL UNIQUE,
-  -- Armazena somente o hash do bcrypt; nunca uma senha original.
   senha VARCHAR(255) NOT NULL,
-  nivel ENUM('usuario', 'admin') NOT NULL DEFAULT 'usuario',
+  nivel ENUM('adotante', 'ong', 'protetor', 'admin')
+    NOT NULL DEFAULT 'adotante',
   criado_em TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 ) ENGINE=InnoDB;
 
-CREATE TABLE IF NOT EXISTS produtos (
+-- Animais disponíveis para adoção
+CREATE TABLE IF NOT EXISTS animais (
   id INT PRIMARY KEY AUTO_INCREMENT,
   nome VARCHAR(120) NOT NULL,
-  descricao VARCHAR(500),
-  categoria VARCHAR(100),
-  preco DECIMAL(10,2) NOT NULL,
-  estoque INT NOT NULL DEFAULT 0,
+  especie ENUM('Cachorro', 'Gato') NOT NULL,
+  raca VARCHAR(100),
+  idade INT NOT NULL,
+  unidade_idade ENUM('anos', 'meses') NOT NULL,
+  sexo ENUM('Macho', 'Fêmea') NOT NULL,
+  porte ENUM('Pequeno', 'Médio', 'Grande') NOT NULL,
+  descricao TEXT,
+  cidade VARCHAR(120) NOT NULL,
+  foto VARCHAR(1000),
+  saude VARCHAR(500),
+  status ENUM('disponivel', 'em_processo', 'adotado')
+    NOT NULL DEFAULT 'disponivel',
+  usuario_id INT NOT NULL,
   criado_em TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  CONSTRAINT chk_produtos_preco CHECK (preco >= 0),
-  CONSTRAINT chk_produtos_estoque CHECK (estoque >= 0)
+  FOREIGN KEY (usuario_id) REFERENCES usuarios(id)
+    ON DELETE RESTRICT
 ) ENGINE=InnoDB;
 
--- IDs explícitos e INSERT IGNORE mantêm os seis exemplos sem duplicar a cada execução.
--- Registros existentes com esses IDs são preservados.
-INSERT IGNORE INTO produtos (id, nome, descricao, categoria, preco, estoque) VALUES
-  (1, 'Notebook', 'Notebook para estudar, programar e realizar atividades do dia a dia.', 'Computadores', 3299.90, 8),
-  (2, 'Mouse', 'Mouse óptico USB com três botões.', 'Periféricos', 49.90, 35),
-  (3, 'Teclado', 'Teclado USB com padrão brasileiro ABNT2.', 'Periféricos', 119.90, 20),
-  (4, 'Monitor', 'Monitor de 24 polegadas para estudo e trabalho.', 'Monitores', 899.90, 12),
-  (5, 'Headset', 'Fone de ouvido com microfone para aulas e chamadas.', 'Áudio', 179.90, 18),
-  (6, 'Webcam', 'Câmera USB para videoaulas e reuniões.', 'Periféricos', 229.90, 15);
+-- Animais favoritos dos usuários
+CREATE TABLE IF NOT EXISTS favoritos (
+  id INT PRIMARY KEY AUTO_INCREMENT,
+  usuario_id INT NOT NULL,
+  animal_id INT NOT NULL,
+  criado_em TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY uq_favorito (usuario_id, animal_id),
+  FOREIGN KEY (usuario_id) REFERENCES usuarios(id)
+    ON DELETE CASCADE,
+  FOREIGN KEY (animal_id) REFERENCES animais(id)
+    ON DELETE CASCADE
+) ENGINE=InnoDB;
 
--- Contas demonstrativas para a aula: uma comum e uma administrativa.
--- Os valores de senha abaixo são hashes bcrypt de custo 10, compatíveis com
--- bcrypt.compare() no login. As credenciais de demonstração estão no README.
--- Sem IDs fixos: o MySQL gera as chaves e não conflita com contas já existentes.
--- INSERT IGNORE preserva senha e nível se o e-mail já estiver cadastrado.
-INSERT IGNORE INTO usuarios (nome, email, senha, nivel) VALUES
-  ('Usuário de demonstração', 'usuario@loja.com', '$2b$10$iGSCOAfHr.Z6b8rYTiSj/.JkX1dVqXOrQX51zQzuDG8eU2dj2Ijwa', 'usuario'),
-  ('Administrador de demonstração', 'admin@loja.com', '$2b$10$bKxUFTiSnDAZb5EHVy9QV.bTlqQaUUW1qPO6Y/XJ9JVHotJkd9dIK', 'admin');
-
--- Para criar outro administrador com uma senha própria, use opcionalmente:
--- node backend/scripts/criarAdmin.js (configurado em backend/.env).
+-- Solicitações de adoção
+CREATE TABLE IF NOT EXISTS adocoes (
+  id INT PRIMARY KEY AUTO_INCREMENT,
+  usuario_id INT NOT NULL,
+  animal_id INT NOT NULL,
+  mensagem VARCHAR(1000) NOT NULL DEFAULT '',
+  tipo_moradia VARCHAR(50),
+  possui_outros_animais BOOLEAN,
+  observacoes TEXT,
+  status ENUM('pendente', 'aprovada', 'recusada', 'cancelada')
+    NOT NULL DEFAULT 'pendente',
+  criado_em TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (usuario_id) REFERENCES usuarios(id)
+    ON DELETE CASCADE,
+  FOREIGN KEY (animal_id) REFERENCES animais(id)
+    ON DELETE CASCADE
+) ENGINE=InnoDB;
 ```
 
 
-### loja-jwt/screens/CadastrarProduto.js
+### petmatch/screens/Animais.js
 
 ```js
-import React, { useState } from 'react';
-import { Text, View } from 'react-native';
-import FormularioProduto, { prepararProduto } from '../components/FormularioProduto';
-import { Aviso, Botao, Pagina, Painel, estilos } from '../components/ui';
-import { fetchAutenticado, lerResposta } from '../services/api';
 
-export default function CadastrarProduto({ navigation, usuario }) {
-  // Um State guarda os cinco valores do formulário.
-  const [campos, setCampos] = useState({ nome: '', descricao: '', categoria: '', preco: '', estoque: '0' });
-  const [salvando, setSalvando] = useState(false);
-  const [erro, setErro] = useState('');
-  const [sucesso, setSucesso] = useState('');
-
-  function alterarCampo(campo, texto) {
-    setCampos(function (anteriores) { return { ...anteriores, [campo]: texto }; });
-    setErro('');
-    setSucesso('');
-  }
-
-  async function cadastrarProduto() {
-    if (salvando) return;
-    setErro('');
-    setSucesso('');
-
-    try {
-      const produto = prepararProduto(campos);
-      setSalvando(true);
-
-      // fetchAutenticado busca o token e envia Authorization: Bearer TOKEN.
-      // Quem decide se o cadastro é permitido são os middlewares da API.
-      const resposta = await fetchAutenticado('/produtos', {
-        method: 'POST',
-        body: JSON.stringify(produto),
-      });
-      const dados = await lerResposta(resposta);
-      setSucesso(dados.mensagem || 'Produto cadastrado com sucesso.');
-      setCampos({ nome: '', descricao: '', categoria: '', preco: '', estoque: '0' });
-    } catch (falha) {
-      setErro(falha.message);
-    } finally {
-      setSalvando(false);
-    }
-  }
-
-  // Esta condição melhora a interface. A segurança real está no back-end.
-  if (usuario?.nivel !== 'admin') {
-    return <Pagina><Aviso mensagem="Acesso permitido apenas para administradores." /></Pagina>;
-  }
-
-  return (
-    <Pagina>
-      <Text style={estilos.etiqueta}>ADMINISTRAÇÃO</Text>
-      <Text style={estilos.titulo}>Novo produto</Text>
-      <Text style={estilos.subtitulo}>Preencha os dados para adicionar um item ao catálogo.</Text>
-      <Aviso mensagem={erro} />
-      <Aviso mensagem={sucesso} tipo="sucesso" />
-      <Painel>
-        <FormularioProduto
-          campos={campos}
-          onAlterar={alterarCampo}
-          onSalvar={cadastrarProduto}
-          salvando={salvando}
-          tituloBotao="Cadastrar produto"
-        />
-      </Painel>
-      <View style={{ marginTop: 16 }}>
-        <Botao
-          titulo="Ver catálogo"
-          variante="secundario"
-          disabled={salvando}
-          onPress={function () { navigation.navigate('Produtos'); }}
-        />
-      </View>
-    </Pagina>
-  );
-}
-```
-
-
-### loja-jwt/screens/CadastroUsuario.js
-
-```js
-import { useState } from 'react';
-import { Text } from 'react-native';
-import { API, lerResposta } from '../services/api.js';
-import { Aviso, Botao, Campo, Pagina, Painel, estilos } from '../components/ui.js';
-
-export default function CadastroUsuario({ navigation }) {
-  const [nome, setNome] = useState('');
-  const [email, setEmail] = useState('');
-  const [senha, setSenha] = useState('');
-  const [confirmacao, setConfirmacao] = useState('');
-  const [erro, setErro] = useState('');
-  const [sucesso, setSucesso] = useState('');
-  const [enviando, setEnviando] = useState(false);
-
-  async function cadastrarUsuario() {
-    if (enviando) { return; }
-    setErro('');
-    if (!nome.trim() || !email.trim() || !senha.trim() || !confirmacao) { setErro('Preencha todos os campos.'); return; }
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) { setErro('Informe um e-mail válido.'); return; }
-    if (senha.length < 8) { setErro('A senha deve ter pelo menos 8 caracteres.'); return; }
-    if (senha !== confirmacao) { setErro('As senhas não são iguais.'); return; }
-    setEnviando(true);
-    try {
-      // Não enviamos nível. O servidor define 'usuario', mesmo se o body for adulterado.
-      const resposta = await fetch(API + '/auth/cadastro', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ nome: nome.trim(), email: email.trim().toLowerCase(), senha }),
-      });
-      const dados = await lerResposta(resposta);
-      setSenha(''); setConfirmacao('');
-      setSucesso(dados.mensagem || 'Conta criada! Agora entre com seu e-mail e senha.');
-    } catch (falha) {
-      setErro(falha.status ? falha.message : 'Não foi possível cadastrar. Confira sua conexão e se a API está executando.');
-    } finally { setEnviando(false); }
-  }
-
-  function voltarLogin() { navigation.goBack(); }
-
-  return <Pagina><Painel style={{ maxWidth: 540, width: '100%', alignSelf: 'center' }}>
-    <Text style={estilos.etiqueta}>SUA CONTA NA LOJA</Text>
-    <Text style={estilos.titulo}>Vamos começar</Text>
-    <Text style={estilos.subtitulo}>Crie sua conta para explorar o catálogo.</Text>
-    <Aviso mensagem={erro} /><Aviso mensagem={sucesso} tipo="sucesso" />
-    {!sucesso && <>
-      <Campo rotulo="Nome" value={nome} onChangeText={setNome} placeholder="Como você se chama?" autoComplete="name" maxLength={100} editable={!enviando} />
-      <Campo rotulo="E-mail" value={email} onChangeText={setEmail} placeholder="voce@exemplo.com" keyboardType="email-address" autoCapitalize="none" autoCorrect={false} autoComplete="email" maxLength={150} editable={!enviando} />
-      <Campo rotulo="Senha" value={senha} onChangeText={setSenha} placeholder="Pelo menos 8 caracteres" secureTextEntry autoCapitalize="none" autoComplete="new-password" editable={!enviando} />
-      <Campo rotulo="Confirmar senha" value={confirmacao} onChangeText={setConfirmacao} placeholder="Digite a senha novamente" secureTextEntry autoCapitalize="none" autoComplete="new-password" editable={!enviando} onSubmitEditing={cadastrarUsuario} />
-      <Botao titulo="Cadastrar" onPress={cadastrarUsuario} carregando={enviando} />
-    </>}
-    <Botao titulo="Voltar para o login" onPress={voltarLogin} variante="secundario" disabled={enviando} />
-  </Painel></Pagina>;
-}
-```
-
-
-### loja-jwt/screens/DetalhesProduto.js
-
-```js
 import React, { useCallback, useState } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
-import { useFocusEffect } from '@react-navigation/native';
-import { Aviso, Botao, Carregamento, Pagina, Painel, cores, estilos, moeda } from '../components/ui';
-import { fetchAutenticado, lerResposta } from '../services/api';
-
-export default function DetalhesProduto({ route, navigation, usuario }) {
-  const id = route.params?.id;
-  const [produto, setProduto] = useState(null);
-  const [carregando, setCarregando] = useState(true);
-  const [erro, setErro] = useState('');
-
-  async function carregarProduto(signal) {
-    setCarregando(true);
-    setErro('');
-
-    try {
-      if (!id) throw new Error('Produto não informado. Volte ao catálogo.');
-      const resposta = await fetchAutenticado('/produtos/' + id, { signal });
-      const dados = await lerResposta(resposta);
-      if (!signal?.aborted) setProduto(dados);
-    } catch (falha) {
-      if (!signal?.aborted) {
-        setProduto(null);
-        setErro(falha.message);
-      }
-    } finally {
-      if (!signal?.aborted) setCarregando(false);
-    }
-  }
-
-  // Ao voltar da edição, a tela recebe foco e consulta os dados atualizados.
-  useFocusEffect(useCallback(function () {
-    const controle = new AbortController();
-    carregarProduto(controle.signal);
-    return function () { controle.abort(); };
-  }, [id]));
-
-  return (
-    <Pagina>
-      <Text style={estilos.etiqueta}>CATÁLOGO / DETALHES</Text>
-      <Aviso mensagem={erro} />
-      {carregando ? <Carregamento mensagem="Carregando produto..." /> : produto ? (
-        <Painel>
-          <Text style={estilos.titulo}>{produto.nome}</Text>
-          <Text style={estilos.subtitulo}>{produto.categoria || 'Sem categoria'}</Text>
-          <Text style={locais.preco}>{moeda(produto.preco)}</Text>
-          <Text style={locais.estoque}>{produto.estoque} unidade(s) em estoque</Text>
-          <View style={estilos.separador} />
-          <Text style={estilos.etiqueta}>SOBRE O PRODUTO</Text>
-          <Text style={estilos.texto}>{produto.descricao || 'Nenhuma descrição cadastrada.'}</Text>
-          {/* Os botões por nível melhoram a interface. A API autoriza cada PUT. */}
-          {usuario.nivel === 'admin' && (
-            <View style={{ marginTop: 24 }}>
-              <Botao titulo="Editar produto" onPress={function () { navigation.navigate('EditarProduto', { id: produto.id }); }} />
-            </View>
-          )}
-        </Painel>
-      ) : (
-        <Botao titulo="Tentar novamente" onPress={function () { carregarProduto(); }} />
-      )}
-      <View style={{ marginTop: 16 }}>
-        <Botao titulo="Voltar" variante="secundario" onPress={function () { navigation.goBack(); }} />
-      </View>
-    </Pagina>
-  );
-}
-
-const locais = StyleSheet.create({
-  preco: { color: cores.verde, fontSize: 36, fontWeight: '700', marginVertical: 16 },
-  estoque: { color: cores.muted, fontSize: 15, marginBottom: 12 },
-});
-```
-
-
-### loja-jwt/screens/EditarProduto.js
-
-```js
-import React, { useCallback, useState } from 'react';
-import { Text, View } from 'react-native';
-import { useFocusEffect } from '@react-navigation/native';
-import FormularioProduto, { prepararProduto } from '../components/FormularioProduto';
-import { Aviso, Botao, Carregamento, Pagina, Painel, estilos } from '../components/ui';
-import { fetchAutenticado, lerResposta } from '../services/api';
-
-export default function EditarProduto({ route, navigation, usuario }) {
-  // O identificador é enviado por navigation.navigate('EditarProduto', { id }).
-  const id = route.params?.id;
-  const [campos, setCampos] = useState(null);
-  const [carregando, setCarregando] = useState(true);
-  const [salvando, setSalvando] = useState(false);
-  const [erro, setErro] = useState('');
-  const [sucesso, setSucesso] = useState('');
-
-  async function carregarProduto(signal) {
-    setCarregando(true);
-    setErro('');
-    setSucesso('');
-
-    try {
-      if (!id) throw new Error('Produto não informado. Volte ao catálogo.');
-      const resposta = await fetchAutenticado('/produtos/' + id, { signal });
-      const produto = await lerResposta(resposta);
-      if (signal?.aborted) return;
-
-      // TextInput trabalha com texto, por isso convertemos preço e estoque.
-      setCampos({
-        nome: produto.nome,
-        descricao: produto.descricao || '',
-        categoria: produto.categoria || '',
-        preco: String(produto.preco).replace('.', ','),
-        estoque: String(produto.estoque),
-      });
-    } catch (falha) {
-      if (!signal?.aborted) {
-        setCampos(null);
-        setErro(falha.message);
-      }
-    } finally {
-      if (!signal?.aborted) setCarregando(false);
-    }
-  }
-
-  // O callback do efeito é síncrono. A função interna faz o trabalho async.
-  useFocusEffect(useCallback(function () {
-    if (usuario?.nivel !== 'admin') return undefined;
-    const controle = new AbortController();
-    carregarProduto(controle.signal);
-    return function () { controle.abort(); };
-  }, [id, usuario?.nivel]));
-
-  function alterarCampo(campo, texto) {
-    setCampos(function (anteriores) { return { ...anteriores, [campo]: texto }; });
-    setErro('');
-    setSucesso('');
-  }
-
-  async function atualizarProduto() {
-    if (salvando) return;
-    setErro('');
-    setSucesso('');
-
-    try {
-      const produto = prepararProduto(campos);
-      setSalvando(true);
-      // O PUT atualiza o registro cujo id está na URL; o JWT vai no header.
-      const resposta = await fetchAutenticado('/produtos/' + id, {
-        method: 'PUT',
-        body: JSON.stringify(produto),
-      });
-      const dados = await lerResposta(resposta);
-      setSucesso(dados.mensagem || 'Produto atualizado com sucesso.');
-    } catch (falha) {
-      setErro(falha.message);
-    } finally {
-      setSalvando(false);
-    }
-  }
-
-  if (usuario?.nivel !== 'admin') {
-    return <Pagina><Aviso mensagem="Acesso permitido apenas para administradores." /></Pagina>;
-  }
-
-  return (
-    <Pagina>
-      <Text style={estilos.etiqueta}>ADMINISTRAÇÃO</Text>
-      <Text style={estilos.titulo}>Editar produto</Text>
-      <Text style={estilos.subtitulo}>Altere os campos e salve para atualizar o catálogo.</Text>
-      <Aviso mensagem={erro} />
-      <Aviso mensagem={sucesso} tipo="sucesso" />
-      {carregando ? <Carregamento mensagem="Carregando produto..." /> : campos ? (
-        <Painel>
-          <FormularioProduto
-            campos={campos}
-            onAlterar={alterarCampo}
-            onSalvar={atualizarProduto}
-            salvando={salvando}
-            tituloBotao="Salvar alterações"
-          />
-        </Painel>
-      ) : (
-        <Botao titulo="Tentar novamente" onPress={function () { carregarProduto(); }} />
-      )}
-      <View style={{ marginTop: 16 }}>
-        <Botao titulo="Voltar" variante="secundario" disabled={salvando} onPress={function () { navigation.goBack(); }} />
-      </View>
-    </Pagina>
-  );
-}
-```
-
-
-### loja-jwt/screens/Home.js
-
-```js
-import { useCallback, useState } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
-import { useFocusEffect } from '@react-navigation/native';
-import { fetchAutenticado, lerResposta } from '../services/api.js';
-import { Aviso, Botao, Pagina, Painel, cores, estilos } from '../components/ui.js';
-
-export default function Home({ navigation, usuario, sair, atualizarUsuario, aviso }) {
-  const [erro, setErro] = useState('');
-  // Ao voltar para Home, buscamos o nível atual: outro admin pode tê-lo alterado.
-  useFocusEffect(useCallback(function verificarUsuarioAtual() {
-    let ativo = true;
-    async function carregarUsuario() {
-      try {
-        const resposta = await fetchAutenticado('/auth/me');
-        const dados = await lerResposta(resposta);
-        if (ativo) { atualizarUsuario(dados); setErro(''); }
-      } catch (falha) {
-        if (ativo && falha.status !== 401) { setErro('Não foi possível atualizar sua conta. Confira a conexão.'); }
-      }
-    }
-    carregarUsuario();
-    return function limparEfeito() { ativo = false; };
-  }, [atualizarUsuario]));
-
-  function verProdutos() { navigation.navigate('Produtos'); }
-  function cadastrarProduto() { navigation.navigate('CadastrarProduto'); }
-  function gerenciarUsuarios() { navigation.navigate('Usuarios'); }
-
-  return <Pagina>
-    <Text style={estilos.etiqueta}>SUA LOJA DE TECNOLOGIA</Text>
-    <Text style={estilos.titulo}>Olá, {usuario.nome}</Text>
-    <Text style={estilos.subtitulo}>Tudo pronto para sua próxima descoberta.</Text>
-    <Aviso mensagem={erro || aviso} />
-    <Painel>
-      <View style={css.linhaConta}>
-        <View style={css.avatar}><Text style={css.inicial}>{usuario.nome.slice(0, 1).toUpperCase()}</Text></View>
-        <View style={{ flex: 1, gap: 4 }}><Text style={css.nome}>{usuario.nome}</Text><Text style={estilos.subtitulo}>{usuario.email}</Text></View>
-      </View>
-      <Text style={estilos.texto}>Nível: <Text style={{ fontWeight: '700' }}>{usuario.nivel}</Text></Text>
-    </Painel>
-    <Painel>
-      <Text style={estilos.etiqueta}>CATÁLOGO</Text>
-      <Text style={estilos.titulo}>Encontre o que combina com você.</Text>
-      <Text style={estilos.subtitulo}>Conheça os produtos, consulte os detalhes e veja a disponibilidade.</Text>
-      <Botao titulo="Ver produtos" onPress={verProdutos} />
-    </Painel>
-    {/* Esconder botões é visual. A autorização real acontece no back-end. */}
-    {usuario.nivel === 'admin' && <Painel>
-      <Text style={estilos.etiqueta}>ADMINISTRAÇÃO</Text>
-      <Text style={estilos.subtitulo}>Cuide do catálogo e dos acessos da loja.</Text>
-      <Botao titulo="Cadastrar produto" onPress={cadastrarProduto} variante="secundario" />
-      <Botao titulo="Gerenciar usuários" onPress={gerenciarUsuarios} variante="secundario" />
-    </Painel>}
-    <Botao titulo="Sair" onPress={sair} variante="secundario" />
-  </Pagina>;
-}
-
-const css = StyleSheet.create({
-  linhaConta: { flexDirection: 'row', alignItems: 'center', gap: 14 },
-  avatar: { width: 48, height: 48, borderRadius: 24, alignItems: 'center', justifyContent: 'center', backgroundColor: '#E8EFE4' },
-  inicial: { color: cores.verde, fontSize: 20, fontWeight: '700' },
-  nome: { color: cores.texto, fontWeight: '700', fontSize: 18 },
-});
-```
-
-
-### loja-jwt/screens/Login.js
-
-```js
-import { useState } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import { API, lerResposta } from '../services/api.js';
-import { Aviso, Botao, Campo, Pagina, Painel, cores, estilos } from '../components/ui.js';
-
-export default function Login({ navigation, aoEntrar, avisoSessao }) {
-  // State guarda o que é digitado somente na memória desta tela.
-  const [email, setEmail] = useState('');
-  const [senha, setSenha] = useState('');
-  const [erro, setErro] = useState('');
-  const [enviando, setEnviando] = useState(false);
-
-  async function realizarLogin() {
-    if (enviando) { return; }
-    setErro('');
-    if (!email.trim() || !senha) { setErro('Preencha o e-mail e a senha.'); return; }
-    setEnviando(true);
-    try {
-      // Login é público: ainda não há token para enviar no Authorization.
-      const resposta = await fetch(API + '/auth/login', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: email.trim().toLowerCase(), senha }),
-      });
-      const dados = await lerResposta(resposta);
-      // Nunca salvamos a senha. AsyncStorage armazena apenas o JWT didaticamente.
-      await AsyncStorage.setItem('token', dados.token);
-      setSenha('');
-      aoEntrar(dados.usuario);
-    } catch (falha) {
-      setErro(falha.status ? falha.message : 'Não foi possível entrar. Verifique se a API está executando e confira o endereço em services/api.js.');
-    } finally { setEnviando(false); }
-  }
-
-  function abrirCadastro() { navigation.navigate('CadastroUsuario'); }
-
-  return <Pagina incluirTopo>
-    <View style={css.marca}><View style={css.simbolo}><Text style={css.sigla}>LJ</Text></View>
-      <View><Text style={css.nome}>LOJA JWT</Text><Text style={estilos.etiqueta}>Tecnologia para o seu dia</Text></View>
-    </View>
-    <View style={css.apresentacao}>
-      <Text style={css.titulo}>Seu próximo{'\n'}item favorito.</Text>
-      <Text style={estilos.subtitulo}>Um catálogo de tecnologia para explorar.{'\n'}Entre na sua conta e conheça os produtos.</Text>
-      <View style={css.selo}><Text style={css.seloTexto}>CATÁLOGO • ACESSO COM CONTA</Text></View>
-    </View>
-    <Painel style={css.formulario}>
-      <Text style={estilos.titulo}>Boas-vindas</Text>
-      <Text style={estilos.subtitulo}>Acesse sua conta para continuar.</Text>
-      <Aviso mensagem={avisoSessao} tipo={avisoSessao === 'Você saiu da sua conta.' ? 'sucesso' : 'erro'} />
-      <Aviso mensagem={erro} />
-      <Campo rotulo="E-mail" value={email} onChangeText={setEmail} placeholder="voce@exemplo.com" keyboardType="email-address" autoCapitalize="none" autoCorrect={false} autoComplete="email" editable={!enviando} maxLength={150} />
-      <Campo rotulo="Senha" value={senha} onChangeText={setSenha} placeholder="Sua senha" secureTextEntry autoCapitalize="none" autoComplete="current-password" editable={!enviando} onSubmitEditing={realizarLogin} />
-      <Botao titulo="Entrar" onPress={realizarLogin} carregando={enviando} />
-      <Text style={css.legenda}>Ainda não tem uma conta?</Text>
-      <Botao titulo="Criar uma conta" onPress={abrirCadastro} variante="secundario" disabled={enviando} />
-    </Painel>
-    <Text style={css.rodape}>LOJA JWT  /  PROJETO DIDÁTICO</Text>
-  </Pagina>;
-}
-
-const css = StyleSheet.create({
-  marca: { flexDirection: 'row', alignItems: 'center', gap: 14, paddingTop: 18 },
-  simbolo: { width: 50, height: 50, backgroundColor: cores.verde, borderRadius: 15, alignItems: 'center', justifyContent: 'center' },
-  sigla: { color: '#FFFFFF', fontWeight: '800', fontSize: 20 },
-  nome: { color: cores.texto, fontSize: 20, fontWeight: '800', marginBottom: 4 },
-  apresentacao: { paddingTop: 24, gap: 16 },
-  titulo: { color: cores.texto, fontSize: 42, fontWeight: '800', lineHeight: 46, letterSpacing: -1.5 },
-  selo: { alignSelf: 'flex-start', borderWidth: 1, borderColor: cores.borda, padding: 10, borderRadius: 30 },
-  seloTexto: { color: cores.verde, fontSize: 10, fontWeight: '700', letterSpacing: 1 },
-  formulario: { width: '100%', maxWidth: 520, alignSelf: 'center', marginTop: 4 },
-  legenda: { textAlign: 'center', color: cores.muted, fontSize: 14 },
-  rodape: { color: cores.muted, textAlign: 'center', fontSize: 10, letterSpacing: 2, marginTop: 4 },
-});
-```
-
-
-### loja-jwt/screens/Produtos.js
-
-```js
-import React, { useCallback, useState } from 'react';
-import { FlatList, Modal, StyleSheet, Text, View } from 'react-native';
+import {
+  FlatList,
+  Image,
+  Modal,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
-import { Aviso, Botao, Carregamento, Painel, cores, estilos, moeda } from '../components/ui';
-import { fetchAutenticado, lerResposta } from '../services/api';
 
-export default function Produtos({ navigation, usuario }) {
-  const [produtos, setProdutos] = useState([]);
+import {
+  Aviso,
+  Botao,
+  Carregamento,
+  Painel,
+  cores,
+  estilos,
+} from '../components/ui.js';
+
+import {
+  fetchAutenticado,
+  lerResposta,
+} from '../services/api.js';
+
+export default function Animais({ navigation, usuario }) {
+  const [animais, setAnimais] = useState([]);
   const [carregando, setCarregando] = useState(true);
   const [erro, setErro] = useState('');
   const [sucesso, setSucesso] = useState('');
-  const [produtoExcluir, setProdutoExcluir] = useState(null);
+  const [animalExcluir, setAnimalExcluir] = useState(null);
   const [excluindo, setExcluindo] = useState(false);
   const [erroExclusao, setErroExclusao] = useState('');
-  const administrador = usuario.nivel === 'admin';
 
-  async function carregarProdutos(signal) {
+  const podeGerenciar =
+    usuario?.nivel === 'ong' ||
+    usuario?.nivel === 'protetor' ||
+    usuario?.nivel === 'admin';
+
+  // BUSCAR ANIMAIS NA API
+  async function carregarAnimais(signal) {
     setCarregando(true);
     setErro('');
 
     try {
-      // Mesmo a consulta exige JWT: fetchAutenticado acrescenta o Bearer token.
-      const resposta = await fetchAutenticado('/produtos', { signal });
+      const resposta = await fetchAutenticado('/animais', {
+        signal,
+      });
+
       const dados = await lerResposta(resposta);
-      if (!signal?.aborted) setProdutos(dados);
+
+      if (!signal?.aborted) {
+        setAnimais(Array.isArray(dados) ? dados : []);
+      }
     } catch (falha) {
-      if (!signal?.aborted) setErro(falha.message);
+      if (!signal?.aborted) {
+        setErro(falha.message);
+      }
     } finally {
-      if (!signal?.aborted) setCarregando(false);
+      if (!signal?.aborted) {
+        setCarregando(false);
+      }
     }
   }
 
-  // Recarregar ao ganhar foco mostra as mudanças feitas em outros screens.
-  // O efeito não é async: ele inicia a consulta e devolve a função de limpeza.
-  useFocusEffect(useCallback(function () {
-    const controle = new AbortController();
-    carregarProdutos(controle.signal);
-    return function () { controle.abort(); };
-  }, []));
+  // ATUALIZAR LISTA AO VOLTAR PARA A TELA
+  useFocusEffect(
+    useCallback(function atualizarLista() {
+      const controle = new AbortController();
 
-  function solicitarExclusao(produto) {
+      carregarAnimais(controle.signal);
+
+      return function limparEfeito() {
+        controle.abort();
+      };
+    }, [])
+  );
+
+  // SOLICITAR EXCLUSÃO
+  function solicitarExclusao(animal) {
     setErroExclusao('');
     setSucesso('');
-    setProdutoExcluir(produto);
+    setAnimalExcluir(animal);
   }
 
   function cancelarExclusao() {
-    if (!excluindo) setProdutoExcluir(null);
+    if (!excluindo) {
+      setAnimalExcluir(null);
+    }
   }
 
-  async function excluirProduto() {
-    if (!produtoExcluir || excluindo) return;
+  // EXCLUIR ANIMAL
+  async function excluirAnimal() {
+    if (!animalExcluir || excluindo) return;
+
     setExcluindo(true);
     setErroExclusao('');
 
     try {
-      const resposta = await fetchAutenticado('/produtos/' + produtoExcluir.id, { method: 'DELETE' });
+      const resposta = await fetchAutenticado(
+        '/animais/' + animalExcluir.id,
+        { method: 'DELETE' }
+      );
+
       const dados = await lerResposta(resposta);
-      // Removemos também do State; se a próxima consulta falhar, o item
-      // que a API já excluiu não continua aparecendo na lista antiga.
-      setProdutos(function (atuais) {
-        return atuais.filter(function (produto) { return produto.id !== produtoExcluir.id; });
+
+      setAnimais(function (atuais) {
+        return atuais.filter(
+          (animal) => animal.id !== animalExcluir.id
+        );
       });
-      setProdutoExcluir(null);
-      setSucesso(dados.mensagem || 'Produto excluído com sucesso.');
-      await carregarProdutos();
+
+      setAnimalExcluir(null);
+
+      setSucesso(
+        dados.mensagem || 'Cadastro removido com sucesso.'
+      );
+
+      await carregarAnimais();
     } catch (falha) {
       setErroExclusao(falha.message);
     } finally {
@@ -2146,67 +3030,229 @@ export default function Produtos({ navigation, usuario }) {
     }
   }
 
-  function renderizarProduto({ item }) {
+  // FORMATAR INFORMAÇÕES
+  function formatarIdade(animal) {
+    if (animal.idade === null || animal.idade === undefined) {
+      return 'Idade não informada';
+    }
+
+    const idade = Number(animal.idade);
+    if (!Number.isFinite(idade)) return String(animal.idade);
+
+    const unidade = animal.unidade_idade || 'anos';
+
+    if (unidade === 'meses') {
+      return idade + (idade === 1 ? ' mês' : ' meses');
+    }
+
+    return idade + (idade === 1 ? ' ano' : ' anos');
+  }
+
+  // CARTÃO DO ANIMAL
+  function renderizarAnimal({ item }) {
+    const status = item.status || 'disponivel';
+
+    const statusTexto =
+      status === 'disponivel'
+        ? 'Disponível para adoção'
+        : status === 'em_processo'
+        ? 'Em processo de adoção'
+        : status === 'adotado'
+        ? 'Adotado'
+        : status;
+
     return (
       <Painel style={locais.cartao}>
-        <Text style={locais.categoria}>{item.categoria || 'Sem categoria'}</Text>
-        <Text style={locais.nome}>{item.nome}</Text>
-        <Text style={locais.preco}>{moeda(item.preco)}</Text>
-        <Text style={locais.estoque}>{item.estoque} unidade(s) em estoque</Text>
-        <View style={locais.acoes}>
-          <Botao titulo="Ver detalhes" onPress={function () { navigation.navigate('DetalhesProduto', { id: item.id }); }} />
-          {/* Esconder botões ajuda na interface, mas não protege as rotas.
-              A API também exige autenticarToken + somenteAdmin para editar/excluir. */}
-          {administrador && (
-            <View style={locais.acoes}>
-              <Botao titulo="Editar" variante="secundario" onPress={function () { navigation.navigate('EditarProduto', { id: item.id }); }} />
-              <Botao titulo="Excluir" variante="perigo" disabled={excluindo} onPress={function () { solicitarExclusao(item); }} />
-            </View>
-          )}
+        {item.foto ? (
+          <Image
+            source={{ uri: item.foto }}
+            style={locais.foto}
+            resizeMode="cover"
+          />
+        ) : (
+          <View style={locais.semFoto}>
+            <Text style={locais.textoSemFoto}>
+              Foto do pet
+            </Text>
+          </View>
+        )}
+
+        <View style={locais.informacoes}>
+          <Text style={locais.especie}>
+            {item.especie || 'Animal para adoção'}
+          </Text>
+
+          <Text style={locais.nome}>
+            {item.nome}
+          </Text>
+
+          <Text style={locais.detalhe}>
+            Raça: {item.raca || 'Não informada'}
+          </Text>
+
+          <Text style={locais.detalhe}>
+            Idade: {formatarIdade(item)}
+          </Text>
+
+          <Text style={locais.detalhe}>
+            Porte: {item.porte || 'Não informado'}
+          </Text>
+
+          <Text style={locais.detalhe}>
+            Localização: {item.cidade || 'Não informada'}
+          </Text>
+
+          <View style={locais.statusContainer}>
+            <Text style={locais.status}>
+              {statusTexto}
+            </Text>
+          </View>
+
+          <View style={locais.acoes}>
+            <Botao
+              titulo="Conhecer este pet"
+              onPress={() =>
+                navigation.navigate('DetalhesAnimal', {
+                  id: item.id,
+                })
+              }
+            />
+
+            {podeGerenciar && (
+              <>
+                <Botao
+                  titulo="Editar cadastro"
+                  variante="secundario"
+                  onPress={() =>
+                    navigation.navigate('EditarAnimal', {
+                      id: item.id,
+                    })
+                  }
+                />
+
+                <Botao
+                  titulo="Excluir cadastro"
+                  variante="perigo"
+                  disabled={excluindo}
+                  onPress={() => solicitarExclusao(item)}
+                />
+              </>
+            )}
+          </View>
         </View>
       </Painel>
     );
   }
 
   return (
-    <SafeAreaView style={locais.tela} edges={['left', 'right', 'bottom']}>
-      {/* FlatList é a única área de rolagem desta tela. Não a colocamos em ScrollView. */}
+    <SafeAreaView
+      style={locais.tela}
+      edges={['left', 'right', 'bottom']}
+    >
       <FlatList
-        data={produtos}
-        keyExtractor={function (item) { return String(item.id); }}
-        renderItem={renderizarProduto}
+        data={animais}
+        keyExtractor={(item) => String(item.id)}
+        renderItem={renderizarAnimal}
         contentContainerStyle={locais.conteudo}
         refreshing={carregando}
-        onRefresh={function () { carregarProdutos(); }}
+        onRefresh={() => carregarAnimais()}
         ListHeaderComponent={
           <View style={locais.cabecalho}>
-            <Text style={estilos.etiqueta}>LOJA JWT / CATÁLOGO</Text>
-            <Text style={estilos.titulo}>Produtos</Text>
-            <Text style={estilos.subtitulo}>Tecnologia para o seu dia a dia. Explore os detalhes de cada item.</Text>
+            <Text style={estilos.etiqueta}>
+              PETMATCH / ADOÇÃO RESPONSÁVEL
+            </Text>
+
+            <Text style={estilos.titulo}>
+              Encontre seu novo amigo!
+            </Text>
+
+            <Text style={estilos.subtitulo}>
+              Conheça os animais que estão esperando
+              por uma família e descubra quem pode
+              fazer parte da sua vida.
+            </Text>
+
             <View style={locais.acoes}>
-              {administrador && <Botao titulo="Cadastrar produto" onPress={function () { navigation.navigate('CadastrarProduto'); }} />}
-              <Botao titulo="Atualizar lista" variante="secundario" disabled={carregando || excluindo} onPress={function () { carregarProdutos(); }} />
+              {podeGerenciar && (
+                <Botao
+                  titulo="Cadastrar animal"
+                  onPress={() =>
+                    navigation.navigate('CadastrarAnimal')
+                  }
+                />
+              )}
+
+              <Botao
+                titulo="Atualizar lista"
+                variante="secundario"
+                disabled={carregando || excluindo}
+                onPress={() => carregarAnimais()}
+              />
             </View>
-            <Text style={locais.contagem}>{produtos.length} produto(s) no catálogo</Text>
+
+            <Text style={locais.contagem}>
+              {animais.length} animal(is) cadastrado(s)
+            </Text>
+
             <Aviso mensagem={erro} />
             <Aviso mensagem={sucesso} tipo="sucesso" />
           </View>
         }
-        ListEmptyComponent={carregando ? <Carregamento mensagem="Carregando produtos..." /> : (
-          <Painel><Text style={estilos.texto}>{erro ? 'Não foi possível carregar o catálogo. Tente atualizar a lista.' : 'Nenhum produto cadastrado no momento.'}</Text></Painel>
-        )}
+        ListEmptyComponent={
+          carregando ? (
+            <Carregamento mensagem="Buscando animais..." />
+          ) : (
+            <Painel>
+              <Text style={estilos.texto}>
+                {erro
+                  ? 'Não foi possível carregar os animais. Tente atualizar a lista.'
+                  : 'Nenhum animal cadastrado no momento.'}
+              </Text>
+            </Painel>
+          )
+        }
       />
 
-      {/* Modal funciona na Web, Android e iOS, permitindo confirmar antes do DELETE. */}
-      <Modal visible={produtoExcluir !== null} transparent animationType="fade" onRequestClose={cancelarExclusao}>
+      {/* CONFIRMAÇÃO DE EXCLUSÃO */}
+      <Modal
+        visible={animalExcluir !== null}
+        transparent
+        animationType="fade"
+        onRequestClose={cancelarExclusao}
+      >
         <View style={locais.fundoModal}>
-          <View style={locais.modal} accessibilityViewIsModal>
-            <Text style={estilos.titulo} accessibilityRole="header">Excluir produto?</Text>
-            <Text style={estilos.texto}>O produto “{produtoExcluir?.nome}” será removido do catálogo.</Text>
+          <View
+            style={locais.modal}
+            accessibilityViewIsModal
+          >
+            <Text
+              style={estilos.titulo}
+              accessibilityRole="header"
+            >
+              Excluir cadastro?
+            </Text>
+
+            <Text style={estilos.texto}>
+              O animal "{animalExcluir?.nome}" será
+              removido dos anúncios de adoção.
+            </Text>
+
             <Aviso mensagem={erroExclusao} />
+
             <View style={locais.acoes}>
-              <Botao titulo="Confirmar exclusão" variante="perigo" carregando={excluindo} onPress={excluirProduto} />
-              <Botao titulo="Cancelar" variante="secundario" disabled={excluindo} onPress={cancelarExclusao} />
+              <Botao
+                titulo="Confirmar exclusão"
+                variante="perigo"
+                carregando={excluindo}
+                onPress={excluirAnimal}
+              />
+
+              <Botao
+                titulo="Cancelar"
+                variante="secundario"
+                disabled={excluindo}
+                onPress={cancelarExclusao}
+              />
             </View>
           </View>
         </View>
@@ -2216,31 +3262,5813 @@ export default function Produtos({ navigation, usuario }) {
 }
 
 const locais = StyleSheet.create({
-  tela: { flex: 1, backgroundColor: cores.fundo },
-  conteudo: { width: '100%', maxWidth: 960, alignSelf: 'center', padding: 22, paddingBottom: 48, flexGrow: 1 },
-  cabecalho: { marginBottom: 18 },
-  cartao: { marginBottom: 16 },
-  categoria: { color: cores.muted, fontSize: 12, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 8 },
-  nome: { color: cores.texto, fontSize: 23, fontWeight: '700' },
-  preco: { color: cores.verde, fontSize: 27, fontWeight: '700', marginVertical: 10 },
-  estoque: { color: cores.muted, fontSize: 14, marginBottom: 18 },
-  acoes: { gap: 10 },
-  contagem: { color: cores.muted, fontSize: 13, marginTop: 20 },
-  fundoModal: { flex: 1, backgroundColor: 'rgba(15, 35, 27, 0.6)', justifyContent: 'center', alignItems: 'center', padding: 24 },
-  modal: { width: '100%', maxWidth: 460, backgroundColor: cores.papel, borderRadius: 18, padding: 24, gap: 18 },
+  tela: {
+    flex: 1,
+    backgroundColor: cores.fundo,
+  },
+
+  conteudo: {
+    width: '100%',
+    maxWidth: 960,
+    alignSelf: 'center',
+    padding: 22,
+    paddingBottom: 48,
+    flexGrow: 1,
+  },
+
+  cabecalho: {
+    marginBottom: 18,
+  },
+
+  cartao: {
+    marginBottom: 16,
+    overflow: 'hidden',
+  },
+
+  foto: {
+    width: '100%',
+    height: 220,
+    borderRadius: 12,
+    marginBottom: 16,
+  },
+
+  semFoto: {
+    width: '100%',
+    height: 160,
+    borderRadius: 12,
+    backgroundColor: '#E8EFE4',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 16,
+  },
+
+  textoSemFoto: {
+    color: cores.muted,
+    fontSize: 15,
+  },
+
+  informacoes: {
+    gap: 7,
+  },
+
+  especie: {
+    color: cores.verde,
+    fontSize: 12,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: 1,
+  },
+
+  nome: {
+    color: cores.texto,
+    fontSize: 25,
+    fontWeight: '700',
+  },
+
+  detalhe: {
+    color: cores.muted,
+    fontSize: 14,
+  },
+
+  statusContainer: {
+    backgroundColor: '#E8EFE4',
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    alignSelf: 'flex-start',
+    marginVertical: 10,
+  },
+
+  status: {
+    color: cores.verde,
+    fontSize: 13,
+    fontWeight: '700',
+  },
+
+  acoes: {
+    gap: 10,
+    marginTop: 10,
+  },
+
+  contagem: {
+    color: cores.muted,
+    fontSize: 13,
+    marginTop: 20,
+  },
+
+  fundoModal: {
+    flex: 1,
+    backgroundColor: 'rgba(15, 35, 27, 0.6)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 24,
+  },
+
+  modal: {
+    width: '100%',
+    maxWidth: 460,
+    backgroundColor: cores.papel,
+    borderRadius: 18,
+    padding: 24,
+    gap: 18,
+  },
 });
 ```
 
 
-### loja-jwt/screens/Usuarios.js
+### petmatch/screens/CadastrarAnimal.js
 
 ```js
+
+import React, { useState } from 'react';
+import { Text, View } from 'react-native';
+
+import FormularioAnimal, {
+  prepararAnimal,
+} from '../components/FormularioAnimal.js';
+
+import {
+  Aviso,
+  Botao,
+  Pagina,
+  Painel,
+  estilos,
+} from '../components/ui.js';
+
+import {
+  fetchAutenticado,
+  lerResposta,
+} from '../services/api.js';
+
+// CAMPOS INICIAIS DO FORMULÁRIO
+const camposIniciais = {
+  nome: '',
+  especie: '',
+  raca: '',
+  idade: '',
+  unidade_idade: 'anos',
+  porte: '',
+  sexo: '',
+  cidade: '',
+  descricao: '',
+  saude: '',
+  foto: '',
+  status: 'disponivel',
+};
+
+export default function CadastrarAnimal({
+  navigation,
+  usuario,
+}) {
+  const [campos, setCampos] = useState({
+    ...camposIniciais,
+  });
+
+  const [salvando, setSalvando] = useState(false);
+  const [erro, setErro] = useState('');
+  const [sucesso, setSucesso] = useState('');
+
+  // ALTERAR OS CAMPOS DO FORMULÁRIO
+  function alterarCampo(campo, texto) {
+    setCampos(function (anteriores) {
+      return {
+        ...anteriores,
+        [campo]: texto,
+      };
+    });
+
+    setErro('');
+    setSucesso('');
+  }
+
+  // CADASTRAR ANIMAL NA API
+  async function cadastrarAnimal() {
+    if (salvando) return;
+
+    setErro('');
+    setSucesso('');
+
+    try {
+      // VALIDAR E PREPARAR OS DADOS
+      const animal = prepararAnimal(campos);
+
+      setSalvando(true);
+
+      // ENVIO DO TOKEN JWT PELO FETCH AUTENTICADO
+      const resposta = await fetchAutenticado('/animais', {
+        method: 'POST',
+        body: JSON.stringify(animal),
+      });
+
+      const dados = await lerResposta(resposta);
+
+      setSucesso(
+        dados.mensagem || 'Animal cadastrado com sucesso!'
+      );
+
+      // LIMPAR FORMULÁRIO APÓS O CADASTRO
+      setCampos({
+        ...camposIniciais,
+      });
+    } catch (falha) {
+      setErro(
+        falha.message || 'Não foi possível cadastrar o animal.'
+      );
+    } finally {
+      setSalvando(false);
+    }
+  }
+
+  // VERIFICAR PERMISSÕES
+  const podeCadastrar =
+    usuario?.nivel === 'ong' ||
+    usuario?.nivel === 'protetor' ||
+    usuario?.nivel === 'admin';
+
+  if (!podeCadastrar) {
+    return (
+      <Pagina>
+        <Aviso
+          mensagem="Apenas ONGs, protetores e administradores podem cadastrar animais."
+        />
+      </Pagina>
+    );
+  }
+
+  return (
+    <Pagina>
+      {/* CABEÇALHO */}
+      <Text style={estilos.etiqueta}>
+        PETMATCH / GERENCIAMENTO
+      </Text>
+
+      <Text style={estilos.titulo}>
+        Cadastrar animal
+      </Text>
+
+      <Text style={estilos.subtitulo}>
+        Preencha as informações do animal para
+        disponibilizá-lo para adoção no PetMatch.
+      </Text>
+
+      {/* MENSAGENS */}
+      <Aviso mensagem={erro} />
+
+      <Aviso
+        mensagem={sucesso}
+        tipo="sucesso"
+      />
+
+      {/* FORMULÁRIO */}
+      <Painel>
+        <FormularioAnimal
+          campos={campos}
+          onAlterar={alterarCampo}
+          onSalvar={cadastrarAnimal}
+          salvando={salvando}
+          tituloBotao="Cadastrar animal"
+        />
+      </Painel>
+
+      {/* VOLTAR PARA A LISTA */}
+      <View style={{ marginTop: 16 }}>
+        <Botao
+          titulo="Ver animais cadastrados"
+          variante="secundario"
+          disabled={salvando}
+          onPress={() => navigation.navigate('Animais')}
+        />
+      </View>
+    </Pagina>
+  );
+}
+```
+
+
+### petmatch/screens/CadastroUsuario.js
+
+```js
+
+import { useState } from 'react';
+import {
+  ActivityIndicator,
+  KeyboardAvoidingView,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  useWindowDimensions,
+  View,
+} from 'react-native';
+
+import { Ionicons } from '@expo/vector-icons';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+
+import { API, lerResposta } from '../services/api.js';
+
+const C = {
+  fundo: '#FAF8F3',
+  branco: '#FFFFFF',
+  laranja: '#FF7628',
+  laranjaClaro: '#FFF0E5',
+  verde: '#579F13',
+  texto: '#252B35',
+  secundario: '#737984',
+  borda: '#E7E4DE',
+  erro: '#B42318',
+};
+
+export default function CadastroUsuario({
+  navigation,
+  aoEntrar,
+}) {
+  const { width } = useWindowDimensions();
+  const telaGrande = width >= 850;
+
+  const [nome, setNome] = useState('');
+  const [email, setEmail] = useState('');
+  const [senha, setSenha] = useState('');
+  const [confirmacao, setConfirmacao] = useState('');
+  const [mostrarSenha, setMostrarSenha] = useState(false);
+  const [erro, setErro] = useState('');
+  const [enviando, setEnviando] = useState(false);
+
+  async function cadastrarUsuario() {
+    if (enviando) return;
+
+    setErro('');
+
+    const nomeLimpo = nome.trim();
+    const emailLimpo = email.trim().toLowerCase();
+
+    if (
+      !nomeLimpo ||
+      !emailLimpo ||
+      !senha ||
+      !confirmacao
+    ) {
+      setErro('Preencha todos os campos para continuar.');
+      return;
+    }
+
+    if (nomeLimpo.length > 100) {
+      setErro('O nome deve ter no máximo 100 caracteres.');
+      return;
+    }
+
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailLimpo)) {
+      setErro('Informe um e-mail válido.');
+      return;
+    }
+
+    if (senha.length < 8) {
+      setErro('A senha deve ter pelo menos 8 caracteres.');
+      return;
+    }
+
+    if (new TextEncoder().encode(senha).length > 72) {
+      setErro('A senha deve ter no máximo 72 bytes.');
+      return;
+    }
+
+    if (senha !== confirmacao) {
+      setErro('As senhas não são iguais.');
+      return;
+    }
+
+    setEnviando(true);
+
+    let cadastroConcluido = false;
+
+    try {
+      // 1. CADASTRAR NO BANCO DE DADOS
+      const respostaCadastro = await fetch(
+        API + '/auth/cadastro',
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            nome: nomeLimpo,
+            email: emailLimpo,
+            senha,
+          }),
+        }
+      );
+
+      await lerResposta(respostaCadastro);
+      cadastroConcluido = true;
+
+      // 2. FAZER LOGIN AUTOMATICAMENTE
+      const respostaLogin = await fetch(
+        API + '/auth/login',
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            email: emailLimpo,
+            senha,
+          }),
+        }
+      );
+
+      const dadosLogin = await lerResposta(respostaLogin);
+
+      if (!dadosLogin.token || !dadosLogin.usuario) {
+        throw new Error('Resposta de login inválida.');
+      }
+
+      // 3. SALVAR TOKEN JWT
+      await AsyncStorage.setItem(
+        'token',
+        dadosLogin.token
+      );
+
+      setSenha('');
+      setConfirmacao('');
+
+      // 4. ABRIR A HOME PELO APP.JS
+      aoEntrar(dadosLogin.usuario);
+
+    } catch (falha) {
+      if (cadastroConcluido) {
+        setErro(
+          'Sua conta foi criada, mas não foi possível entrar automaticamente. Volte ao login e entre com seu e-mail e senha.'
+        );
+      } else {
+        setErro(
+          falha.status
+            ? falha.message
+            : 'Não foi possível criar sua conta. Confira se a API está funcionando.'
+        );
+      }
+    } finally {
+      setEnviando(false);
+    }
+  }
+
+  return (
+    <KeyboardAvoidingView
+      style={css.tela}
+      behavior={
+        Platform.OS === 'ios' ? 'padding' : undefined
+      }
+    >
+      <ScrollView
+        contentContainerStyle={css.scroll}
+        keyboardShouldPersistTaps="handled"
+      >
+        <View style={css.container}>
+
+          {/* LOGO */}
+          <View style={css.cabecalho}>
+            <View style={css.logoIcone}>
+              <Ionicons
+                name="paw"
+                size={25}
+                color="#FFFFFF"
+              />
+            </View>
+
+            <View>
+              <Text style={css.logoNome}>
+                Pet
+                <Text style={css.logoDestaque}>
+                  Match
+                </Text>
+              </Text>
+
+              <Text style={css.logoSubtitulo}>
+                Conectando pets a novos lares
+              </Text>
+            </View>
+          </View>
+
+          {/* CONTEÚDO */}
+          <View
+            style={[
+              css.conteudo,
+              telaGrande && css.conteudoDesktop,
+            ]}
+          >
+
+            {/* APRESENTAÇÃO */}
+            <View style={css.apresentacao}>
+              <View style={css.etiqueta}>
+                <View style={css.pontoVerde} />
+
+                <Text style={css.etiquetaTexto}>
+                  FAÇA PARTE DO PETMATCH
+                </Text>
+              </View>
+
+              <Text
+                style={[
+                  css.tituloPrincipal,
+                  !telaGrande && css.tituloMobile,
+                ]}
+              >
+                Seu próximo{'\n'}
+                melhor amigo{'\n'}
+                <Text style={css.tituloDestaque}>
+                  espera por você.
+                </Text>
+              </Text>
+
+              <Text style={css.descricao}>
+                Crie sua conta e conheça cães e gatos
+                que estão esperando por uma família.
+                O primeiro passo para uma nova história
+                começa aqui.
+              </Text>
+
+              <View style={css.informacao}>
+                <View style={css.barraVerde} />
+
+                <Text style={css.informacaoTexto}>
+                  A adoção responsável transforma
+                  a vida dos animais e de quem os acolhe.
+                </Text>
+              </View>
+            </View>
+
+            {/* FORMULÁRIO */}
+            <View style={css.cartao}>
+
+              <Text style={css.tituloFormulario}>
+                Crie sua conta
+              </Text>
+
+              <Text style={css.subtituloFormulario}>
+                Preencha seus dados para começar.
+              </Text>
+
+              {!!erro && (
+                <View style={css.avisoErro}>
+                  <Text style={css.erroTexto}>
+                    {erro}
+                  </Text>
+                </View>
+              )}
+
+              {/* NOME */}
+              <View style={css.campoGrupo}>
+                <Text style={css.rotulo}>
+                  Nome completo
+                </Text>
+
+                <TextInput
+                  style={css.campo}
+                  placeholder="Digite seu nome"
+                  placeholderTextColor="#A1A5AD"
+                  value={nome}
+                  onChangeText={setNome}
+                  autoComplete="name"
+                  autoCapitalize="words"
+                  maxLength={100}
+                  editable={!enviando}
+                />
+              </View>
+
+              {/* E-MAIL */}
+              <View style={css.campoGrupo}>
+                <Text style={css.rotulo}>
+                  E-mail
+                </Text>
+
+                <TextInput
+                  style={css.campo}
+                  placeholder="seuemail@exemplo.com"
+                  placeholderTextColor="#A1A5AD"
+                  value={email}
+                  onChangeText={setEmail}
+                  keyboardType="email-address"
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  autoComplete="email"
+                  maxLength={150}
+                  editable={!enviando}
+                />
+              </View>
+
+              {/* SENHA */}
+              <View style={css.campoGrupo}>
+                <Text style={css.rotulo}>
+                  Senha
+                </Text>
+
+                <View style={css.campoSenha}>
+                  <TextInput
+                    style={css.inputSenha}
+                    placeholder="Pelo menos 8 caracteres"
+                    placeholderTextColor="#A1A5AD"
+                    value={senha}
+                    onChangeText={setSenha}
+                    secureTextEntry={!mostrarSenha}
+                    autoCapitalize="none"
+                    autoComplete="new-password"
+                    editable={!enviando}
+                  />
+
+                  <Pressable
+                    style={css.botaoMostrar}
+                    onPress={() =>
+                      setMostrarSenha(!mostrarSenha)
+                    }
+                    accessibilityRole="button"
+                    accessibilityLabel={
+                      mostrarSenha
+                        ? 'Ocultar senhas'
+                        : 'Mostrar senhas'
+                    }
+                  >
+                    <Text style={css.mostrarTexto}>
+                      {mostrarSenha ? 'Ocultar' : 'Mostrar'}
+                    </Text>
+                  </Pressable>
+                </View>
+              </View>
+
+              {/* CONFIRMAR SENHA */}
+              <View style={css.campoGrupo}>
+                <Text style={css.rotulo}>
+                  Confirmar senha
+                </Text>
+
+                <TextInput
+                  style={css.campo}
+                  placeholder="Digite sua senha novamente"
+                  placeholderTextColor="#A1A5AD"
+                  value={confirmacao}
+                  onChangeText={setConfirmacao}
+                  secureTextEntry={!mostrarSenha}
+                  autoCapitalize="none"
+                  autoComplete="new-password"
+                  editable={!enviando}
+                  onSubmitEditing={cadastrarUsuario}
+                />
+              </View>
+
+              {/* CRIAR CONTA */}
+              <Pressable
+                style={[
+                  css.botaoPrincipal,
+                  enviando && css.botaoDesativado,
+                ]}
+                onPress={cadastrarUsuario}
+                disabled={enviando}
+                accessibilityRole="button"
+              >
+                {enviando ? (
+                  <ActivityIndicator color="#FFFFFF" />
+                ) : (
+                  <Text style={css.botaoPrincipalTexto}>
+                    Criar minha conta
+                  </Text>
+                )}
+              </Pressable>
+
+              {/* DIVISOR */}
+              <View style={css.divisor}>
+                <View style={css.linha} />
+
+                <Text style={css.divisorTexto}>
+                  OU
+                </Text>
+
+                <View style={css.linha} />
+              </View>
+
+              <Text style={css.textoLogin}>
+                Já tem uma conta?
+              </Text>
+
+              <Pressable
+                style={css.botaoSecundario}
+                onPress={() => navigation.goBack()}
+                disabled={enviando}
+                accessibilityRole="button"
+              >
+                <Text style={css.botaoSecundarioTexto}>
+                  Voltar para o login
+                </Text>
+              </Pressable>
+
+            </View>
+          </View>
+
+          {/* RODAPÉ */}
+          <View style={css.rodape}>
+            <Text style={css.rodapeTexto}>
+              PetMatch • Adoção responsável
+            </Text>
+          </View>
+
+        </View>
+      </ScrollView>
+    </KeyboardAvoidingView>
+  );
+}
+
+const css = StyleSheet.create({
+  tela: {
+    flex: 1,
+    backgroundColor: C.fundo,
+  },
+
+  scroll: {
+    flexGrow: 1,
+  },
+
+  container: {
+    width: '100%',
+    maxWidth: 1080,
+    alignSelf: 'center',
+    paddingHorizontal: 24,
+    flexGrow: 1,
+  },
+
+  cabecalho: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 22,
+    gap: 10,
+  },
+
+  logoIcone: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    backgroundColor: C.laranja,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  logoNome: {
+    color: C.texto,
+    fontSize: 23,
+    fontWeight: '900',
+    letterSpacing: -0.7,
+  },
+
+  logoDestaque: {
+    color: C.laranja,
+  },
+
+  logoSubtitulo: {
+    color: C.secundario,
+    fontSize: 10,
+    marginTop: 1,
+  },
+
+  conteudo: {
+    flex: 1,
+    justifyContent: 'center',
+    paddingVertical: 15,
+    gap: 25,
+  },
+
+  conteudoDesktop: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 40,
+  },
+
+  apresentacao: {
+    flex: 1,
+    maxWidth: 500,
+  },
+
+  etiqueta: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: '#EAF4DF',
+    paddingHorizontal: 13,
+    paddingVertical: 8,
+    borderRadius: 25,
+    alignSelf: 'flex-start',
+    marginBottom: 20,
+  },
+
+  pontoVerde: {
+    width: 7,
+    height: 7,
+    backgroundColor: C.verde,
+    borderRadius: 4,
+  },
+
+  etiquetaTexto: {
+    color: C.verde,
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 0.7,
+  },
+
+  tituloPrincipal: {
+    color: C.texto,
+    fontSize: 43,
+    lineHeight: 51,
+    fontWeight: '900',
+    letterSpacing: -1.5,
+  },
+
+  tituloMobile: {
+    fontSize: 32,
+    lineHeight: 39,
+  },
+
+  tituloDestaque: {
+    color: C.laranja,
+  },
+
+  descricao: {
+    color: C.secundario,
+    fontSize: 14,
+    lineHeight: 23,
+    marginTop: 17,
+    maxWidth: 420,
+  },
+
+  informacao: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 24,
+    gap: 12,
+    maxWidth: 390,
+  },
+
+  barraVerde: {
+    width: 4,
+    height: 42,
+    borderRadius: 3,
+    backgroundColor: C.verde,
+  },
+
+  informacaoTexto: {
+    color: C.texto,
+    fontSize: 13,
+    lineHeight: 20,
+    flex: 1,
+  },
+
+  cartao: {
+    width: '100%',
+    maxWidth: 405,
+    alignSelf: 'center',
+    backgroundColor: C.branco,
+    borderRadius: 22,
+    padding: 25,
+    borderWidth: 1,
+    borderColor: '#EEEAE3',
+    ...Platform.select({
+      web: {
+        boxShadow: '0px 8px 25px rgba(60, 50, 35, 0.06)',
+      },
+      default: {
+        elevation: 3,
+      },
+    }),
+  },
+
+  tituloFormulario: {
+    color: C.texto,
+    fontSize: 21,
+    fontWeight: '800',
+    textAlign: 'center',
+  },
+
+  subtituloFormulario: {
+    color: C.secundario,
+    textAlign: 'center',
+    fontSize: 13,
+    marginTop: 8,
+    marginBottom: 23,
+  },
+
+  avisoErro: {
+    backgroundColor: '#FFF0EF',
+    padding: 12,
+    borderRadius: 10,
+    marginBottom: 15,
+  },
+
+  erroTexto: {
+    color: C.erro,
+    fontSize: 12,
+  },
+
+  campoGrupo: {
+    marginBottom: 15,
+  },
+
+  rotulo: {
+    color: C.texto,
+    fontSize: 13,
+    fontWeight: '700',
+    marginBottom: 8,
+  },
+
+  campo: {
+    height: 46,
+    borderWidth: 1,
+    borderColor: C.borda,
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    backgroundColor: '#FEFDFC',
+    color: C.texto,
+    fontSize: 13,
+  },
+
+  campoSenha: {
+    height: 46,
+    borderWidth: 1,
+    borderColor: C.borda,
+    borderRadius: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FEFDFC',
+  },
+
+  inputSenha: {
+    flex: 1,
+    minWidth: 0,
+    height: '100%',
+    paddingHorizontal: 14,
+    fontSize: 13,
+    color: C.texto,
+  },
+
+  botaoMostrar: {
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+
+  mostrarTexto: {
+    color: C.laranja,
+    fontSize: 11,
+    fontWeight: '700',
+  },
+
+  botaoPrincipal: {
+    height: 46,
+    borderRadius: 12,
+    backgroundColor: C.laranja,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 5,
+  },
+
+  botaoDesativado: {
+    opacity: 0.65,
+  },
+
+  botaoPrincipalTexto: {
+    color: C.branco,
+    fontSize: 14,
+    fontWeight: '800',
+  },
+
+  divisor: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    marginVertical: 17,
+  },
+
+  linha: {
+    flex: 1,
+    height: 1,
+    backgroundColor: C.borda,
+  },
+
+  divisorTexto: {
+    color: C.secundario,
+    fontSize: 10,
+    fontWeight: '700',
+  },
+
+  textoLogin: {
+    textAlign: 'center',
+    color: C.secundario,
+    fontSize: 12,
+    marginBottom: 12,
+  },
+
+  botaoSecundario: {
+    height: 46,
+    borderWidth: 1,
+    borderColor: C.laranja,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  botaoSecundarioTexto: {
+    color: C.laranja,
+    fontSize: 13,
+    fontWeight: '800',
+  },
+
+  rodape: {
+    alignItems: 'center',
+    paddingVertical: 20,
+  },
+
+  rodapeTexto: {
+    color: C.secundario,
+    fontSize: 11,
+    textAlign: 'center',
+  },
+});
+```
+
+
+### petmatch/screens/DetalhesAnimal.js
+
+```js
+
 import React, { useCallback, useState } from 'react';
-import { FlatList, StyleSheet, Text, View } from 'react-native';
+import {
+  Image,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
+
+import { useFocusEffect } from '@react-navigation/native';
+
+import {
+  Aviso,
+  Botao,
+  Carregamento,
+  Pagina,
+  Painel,
+  cores,
+  estilos,
+} from '../components/ui.js';
+
+import {
+  fetchAutenticado,
+  lerResposta,
+} from '../services/api.js';
+
+export default function DetalhesAnimal({
+  route,
+  navigation,
+  usuario,
+}) {
+  const id = route.params?.id;
+
+  const [animal, setAnimal] = useState(null);
+  const [carregando, setCarregando] = useState(true);
+  const [erro, setErro] = useState('');
+
+  // VERIFICAR PERMISSÕES
+  const podeGerenciar =
+    usuario?.nivel === 'ong' ||
+    usuario?.nivel === 'protetor' ||
+    usuario?.nivel === 'admin';
+
+  // BUSCAR INFORMAÇÕES DO ANIMAL NA API
+  async function carregarAnimal(signal) {
+    setCarregando(true);
+    setErro('');
+
+    try {
+      if (!id) {
+        throw new Error(
+          'Animal não informado. Volte para a lista de adoção.'
+        );
+      }
+
+      const resposta = await fetchAutenticado(
+        '/animais/' + id,
+        { signal }
+      );
+
+      const dados = await lerResposta(resposta);
+
+      if (!signal?.aborted) {
+        setAnimal(dados);
+      }
+    } catch (falha) {
+      if (!signal?.aborted) {
+        setAnimal(null);
+        setErro(falha.message);
+      }
+    } finally {
+      if (!signal?.aborted) {
+        setCarregando(false);
+      }
+    }
+  }
+
+  // ATUALIZAR DADOS AO VOLTAR PARA A TELA
+  useFocusEffect(
+    useCallback(function atualizarAnimal() {
+      const controle = new AbortController();
+
+      carregarAnimal(controle.signal);
+
+      return function limparEfeito() {
+        controle.abort();
+      };
+    }, [id])
+  );
+
+  // FORMATAR IDADE
+  function formatarIdade() {
+    if (
+      animal?.idade === null ||
+      animal?.idade === undefined
+    ) {
+      return 'Não informada';
+    }
+
+    const idade = Number(animal.idade);
+
+    if (!Number.isFinite(idade)) {
+      return String(animal.idade);
+    }
+
+    if (animal.unidade_idade === 'meses') {
+      return idade + (idade === 1 ? ' mês' : ' meses');
+    }
+
+    return idade + (idade === 1 ? ' ano' : ' anos');
+  }
+
+  // FORMATAR STATUS
+  function formatarStatus(status) {
+    switch (status) {
+      case 'disponivel':
+        return 'Disponível para adoção';
+
+      case 'em_processo':
+        return 'Em processo de adoção';
+
+      case 'adotado':
+        return 'Adotado';
+
+      default:
+        return status || 'Não informado';
+    }
+  }
+
+  // SOLICITAR ADOÇÃO
+  function solicitarAdocao() {
+    navigation.navigate('SolicitarAdocao', {
+      id: animal.id,
+    });
+  }
+
+  // EDITAR ANIMAL
+  function editarAnimal() {
+    navigation.navigate('EditarAnimal', {
+      id: animal.id,
+    });
+  }
+
+  return (
+    <Pagina>
+      <Text style={estilos.etiqueta}>
+        PETMATCH / PERFIL DO ANIMAL
+      </Text>
+
+      <Aviso mensagem={erro} />
+
+      {carregando ? (
+        <Carregamento mensagem="Carregando informações do pet..." />
+      ) : animal ? (
+        <>
+          <Painel>
+            {/* FOTO DO ANIMAL */}
+            {animal.foto ? (
+              <Image
+                source={{ uri: animal.foto }}
+                style={locais.foto}
+                resizeMode="cover"
+              />
+            ) : (
+              <View style={locais.semFoto}>
+                <Text style={locais.textoSemFoto}>
+                  Foto não disponível
+                </Text>
+              </View>
+            )}
+
+            {/* INFORMAÇÕES PRINCIPAIS */}
+            <Text style={estilos.etiqueta}>
+              {animal.especie || 'ANIMAL PARA ADOÇÃO'}
+            </Text>
+
+            <Text style={locais.nome}>
+              {animal.nome}
+            </Text>
+
+            <Text style={estilos.subtitulo}>
+              Conheça um pouco mais sobre este pet!
+            </Text>
+
+            {/* STATUS DE ADOÇÃO */}
+            <View style={locais.statusContainer}>
+              <Text style={locais.status}>
+                {formatarStatus(animal.status)}
+              </Text>
+            </View>
+
+            <View style={estilos.separador} />
+
+            {/* CARACTERÍSTICAS */}
+            <Text style={estilos.etiqueta}>
+              INFORMAÇÕES DO PET
+            </Text>
+
+            <View style={locais.informacoes}>
+              <Text style={locais.detalhe}>
+                <Text style={locais.rotulo}>Espécie: </Text>
+                {animal.especie || 'Não informada'}
+              </Text>
+
+              <Text style={locais.detalhe}>
+                <Text style={locais.rotulo}>Raça: </Text>
+                {animal.raca || 'Não informada'}
+              </Text>
+
+              <Text style={locais.detalhe}>
+                <Text style={locais.rotulo}>Idade: </Text>
+                {formatarIdade()}
+              </Text>
+
+              <Text style={locais.detalhe}>
+                <Text style={locais.rotulo}>Porte: </Text>
+                {animal.porte || 'Não informado'}
+              </Text>
+
+              <Text style={locais.detalhe}>
+                <Text style={locais.rotulo}>Sexo: </Text>
+                {animal.sexo || 'Não informado'}
+              </Text>
+
+              <Text style={locais.detalhe}>
+                <Text style={locais.rotulo}>Localização: </Text>
+                {animal.cidade || 'Não informada'}
+              </Text>
+            </View>
+
+            <View style={estilos.separador} />
+
+            {/* DESCRIÇÃO */}
+            <Text style={estilos.etiqueta}>
+              SOBRE MIM
+            </Text>
+
+            <Text style={estilos.texto}>
+              {animal.descricao ||
+                'Ainda não temos uma descrição cadastrada para este animal.'}
+            </Text>
+
+            {/* INFORMAÇÕES DE SAÚDE */}
+            {animal.saude ? (
+              <>
+                <View style={estilos.separador} />
+
+                <Text style={estilos.etiqueta}>
+                  SAÚDE E CUIDADOS
+                </Text>
+
+                <Text style={estilos.texto}>
+                  {animal.saude}
+                </Text>
+              </>
+            ) : null}
+
+            {/* SOLICITAÇÃO DE ADOÇÃO */}
+            {animal.status === 'disponivel' &&
+              usuario?.nivel !== 'admin' &&
+              usuario?.nivel !== 'ong' &&
+              usuario?.nivel !== 'protetor' && (
+                <View style={locais.areaBotoes}>
+                  <Botao
+                    titulo="Quero adotar"
+                    onPress={solicitarAdocao}
+                  />
+                </View>
+              )}
+
+            {/* GERENCIAMENTO */}
+            {podeGerenciar && (
+              <View style={locais.areaBotoes}>
+                <Botao
+                  titulo="Editar informações"
+                  onPress={editarAnimal}
+                  variante="secundario"
+                />
+              </View>
+            )}
+          </Painel>
+        </>
+      ) : (
+        <Botao
+          titulo="Tentar novamente"
+          onPress={() => carregarAnimal()}
+        />
+      )}
+
+      <View style={locais.voltar}>
+        <Botao
+          titulo="Voltar"
+          variante="secundario"
+          onPress={() => navigation.goBack()}
+        />
+      </View>
+    </Pagina>
+  );
+}
+
+const locais = StyleSheet.create({
+  foto: {
+    width: '100%',
+    height: 260,
+    borderRadius: 14,
+    marginBottom: 20,
+  },
+
+  semFoto: {
+    width: '100%',
+    height: 200,
+    borderRadius: 14,
+    backgroundColor: '#E8EFE4',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 20,
+  },
+
+  textoSemFoto: {
+    color: cores.muted,
+    fontSize: 15,
+  },
+
+  nome: {
+    color: cores.texto,
+    fontSize: 30,
+    fontWeight: '700',
+    marginVertical: 8,
+  },
+
+  statusContainer: {
+    backgroundColor: '#E8EFE4',
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    borderRadius: 10,
+    alignSelf: 'flex-start',
+    marginVertical: 16,
+  },
+
+  status: {
+    color: cores.verde,
+    fontSize: 14,
+    fontWeight: '700',
+  },
+
+  informacoes: {
+    gap: 12,
+    marginVertical: 16,
+  },
+
+  detalhe: {
+    color: cores.texto,
+    fontSize: 15,
+    lineHeight: 23,
+  },
+
+  rotulo: {
+    fontWeight: '700',
+  },
+
+  areaBotoes: {
+    marginTop: 24,
+    gap: 12,
+  },
+
+  voltar: {
+    marginTop: 16,
+  },
+});
+```
+
+
+### petmatch/screens/EditarAnimal.js
+
+```js
+
+import React, { useCallback, useState } from 'react';
+import { Text, View } from 'react-native';
+import { useFocusEffect } from '@react-navigation/native';
+
+import FormularioAnimal, {
+  prepararAnimal,
+} from '../components/FormularioAnimal.js';
+
+import {
+  Aviso,
+  Botao,
+  Carregamento,
+  Pagina,
+  Painel,
+  estilos,
+} from '../components/ui.js';
+
+import {
+  fetchAutenticado,
+  lerResposta,
+} from '../services/api.js';
+
+export default function EditarAnimal({
+  route,
+  navigation,
+  usuario,
+}) {
+  // ID DO ANIMAL ENVIADO PELA NAVEGAÇÃO
+  const id = route.params?.id;
+
+  const [campos, setCampos] = useState(null);
+  const [carregando, setCarregando] = useState(true);
+  const [salvando, setSalvando] = useState(false);
+  const [erro, setErro] = useState('');
+  const [sucesso, setSucesso] = useState('');
+
+  // VERIFICAR PERMISSÕES
+  const podeGerenciar =
+    usuario?.nivel === 'ong' ||
+    usuario?.nivel === 'protetor' ||
+    usuario?.nivel === 'admin';
+
+  // BUSCAR DADOS DO ANIMAL
+  async function carregarAnimal(signal) {
+    setCarregando(true);
+    setErro('');
+    setSucesso('');
+
+    try {
+      if (!id) {
+        throw new Error(
+          'Animal não informado. Volte para a lista de adoção.'
+        );
+      }
+
+      const resposta = await fetchAutenticado(
+        '/animais/' + id,
+        { signal }
+      );
+
+      const animal = await lerResposta(resposta);
+
+      if (signal?.aborted) return;
+
+      // PREENCHER O FORMULÁRIO COM OS DADOS DO ANIMAL
+      setCampos({
+        nome: animal.nome || '',
+        especie: animal.especie || '',
+        raca: animal.raca || '',
+        idade:
+          animal.idade === null ||
+          animal.idade === undefined
+            ? ''
+            : String(animal.idade),
+        unidade_idade: animal.unidade_idade || 'anos',
+        porte: animal.porte || '',
+        sexo: animal.sexo || '',
+        cidade: animal.cidade || '',
+        descricao: animal.descricao || '',
+        saude: animal.saude || '',
+        foto: animal.foto || '',
+        status: animal.status || 'disponivel',
+      });
+    } catch (falha) {
+      if (!signal?.aborted) {
+        setCampos(null);
+        setErro(
+          falha.message ||
+          'Não foi possível carregar o animal.'
+        );
+      }
+    } finally {
+      if (!signal?.aborted) {
+        setCarregando(false);
+      }
+    }
+  }
+
+  // ATUALIZAR DADOS AO ABRIR A TELA
+  useFocusEffect(
+    useCallback(function atualizarDados() {
+      if (!podeGerenciar) {
+        return undefined;
+      }
+
+      const controle = new AbortController();
+
+      carregarAnimal(controle.signal);
+
+      return function limparEfeito() {
+        controle.abort();
+      };
+    }, [id, podeGerenciar])
+  );
+
+  // ALTERAR CAMPOS DO FORMULÁRIO
+  function alterarCampo(campo, texto) {
+    setCampos(function (anteriores) {
+      return {
+        ...anteriores,
+        [campo]: texto,
+      };
+    });
+
+    setErro('');
+    setSucesso('');
+  }
+
+  // ATUALIZAR ANIMAL NA API
+  async function atualizarAnimal() {
+    if (salvando || !campos) return;
+
+    setErro('');
+    setSucesso('');
+
+    try {
+      // VALIDAR OS DADOS ANTES DO ENVIO
+      const animal = prepararAnimal(campos);
+
+      setSalvando(true);
+
+      // PUT ATUALIZA O ANIMAL PELO ID
+      // O JWT É ENVIADO PELO FETCH AUTENTICADO
+      const resposta = await fetchAutenticado(
+        '/animais/' + id,
+        {
+          method: 'PUT',
+          body: JSON.stringify(animal),
+        }
+      );
+
+      const dados = await lerResposta(resposta);
+
+      setSucesso(
+        dados.mensagem ||
+        'Informações do animal atualizadas com sucesso!'
+      );
+    } catch (falha) {
+      setErro(
+        falha.message ||
+        'Não foi possível atualizar o animal.'
+      );
+    } finally {
+      setSalvando(false);
+    }
+  }
+
+  // BLOQUEAR ACESSO NÃO AUTORIZADO
+  if (!podeGerenciar) {
+    return (
+      <Pagina>
+        <Aviso
+          mensagem="Apenas ONGs, protetores e administradores podem editar animais."
+        />
+      </Pagina>
+    );
+  }
+
+  return (
+    <Pagina>
+      {/* CABEÇALHO */}
+      <Text style={estilos.etiqueta}>
+        PETMATCH / GERENCIAMENTO
+      </Text>
+
+      <Text style={estilos.titulo}>
+        Editar animal
+      </Text>
+
+      <Text style={estilos.subtitulo}>
+        Atualize as informações do animal para
+        manter seu perfil sempre completo.
+      </Text>
+
+      {/* MENSAGENS */}
+      <Aviso mensagem={erro} />
+
+      <Aviso
+        mensagem={sucesso}
+        tipo="sucesso"
+      />
+
+      {/* FORMULÁRIO */}
+      {carregando ? (
+        <Carregamento
+          mensagem="Carregando informações do animal..."
+        />
+      ) : campos ? (
+        <Painel>
+          <FormularioAnimal
+            campos={campos}
+            onAlterar={alterarCampo}
+            onSalvar={atualizarAnimal}
+            salvando={salvando}
+            tituloBotao="Salvar alterações"
+          />
+        </Painel>
+      ) : (
+        <Botao
+          titulo="Tentar novamente"
+          onPress={() => carregarAnimal()}
+        />
+      )}
+
+      {/* BOTÃO VOLTAR */}
+      <View style={{ marginTop: 16 }}>
+        <Botao
+          titulo="Voltar"
+          variante="secundario"
+          disabled={salvando}
+          onPress={() => navigation.goBack()}
+        />
+      </View>
+    </Pagina>
+  );
+}
+```
+
+
+### petmatch/screens/Favoritos.js
+
+```js
+
+import React, { useCallback, useState } from 'react';
+import {
+  View,
+  Text,
+  Image,
+  ScrollView,
+  StyleSheet,
+  ActivityIndicator,
+  Alert,
+  Platform,
+  RefreshControl,
+} from 'react-native';
+
+import { useFocusEffect } from '@react-navigation/native';
+
+import {
+  fetchAutenticado,
+  lerResposta,
+} from '../services/api';
+
+import { Botao, cores } from '../components/ui';
+
+export default function Favoritos({ navigation }) {
+  const [favoritos, setFavoritos] = useState([]);
+  const [carregando, setCarregando] = useState(true);
+  const [atualizando, setAtualizando] = useState(false);
+  const [removendoId, setRemovendoId] = useState(null);
+  const [erro, setErro] = useState('');
+
+  function avisar(titulo, mensagem) {
+    if (Platform.OS === 'web') {
+      window.alert(`${titulo}\n\n${mensagem}`);
+    } else {
+      Alert.alert(titulo, mensagem);
+    }
+  }
+
+  function confirmarRemocao(animalId, nome) {
+    const mensagem = `Deseja remover ${nome} dos seus favoritos?`;
+
+    if (Platform.OS === 'web') {
+      if (window.confirm(mensagem)) {
+        removerFavorito(animalId);
+      }
+      return;
+    }
+
+    Alert.alert(
+      'Remover favorito',
+      mensagem,
+      [
+        {
+          text: 'Cancelar',
+          style: 'cancel',
+        },
+        {
+          text: 'Remover',
+          style: 'destructive',
+          onPress: () => removerFavorito(animalId),
+        },
+      ]
+    );
+  }
+
+  // READ - CARREGAR OS ANIMAIS FAVORITOS
+  const carregarFavoritos = useCallback(
+    async (mostrarCarregamento = true) => {
+      if (mostrarCarregamento) {
+        setCarregando(true);
+      } else {
+        setAtualizando(true);
+      }
+
+      setErro('');
+
+      try {
+        const resposta = await fetchAutenticado('/favoritos');
+        const dados = await lerResposta(resposta);
+
+        setFavoritos(Array.isArray(dados) ? dados : []);
+      } catch (erroRequisicao) {
+        setErro(
+          erroRequisicao.message ||
+            'Não foi possível carregar seus favoritos.'
+        );
+      } finally {
+        setCarregando(false);
+        setAtualizando(false);
+      }
+    },
+    []
+  );
+
+  // ATUALIZAR SEMPRE QUE ABRIR A TELA
+  useFocusEffect(
+    useCallback(() => {
+      carregarFavoritos();
+    }, [carregarFavoritos])
+  );
+
+  // DELETE - REMOVER ANIMAL DOS FAVORITOS
+  async function removerFavorito(animalId) {
+    try {
+      setRemovendoId(animalId);
+
+      const resposta = await fetchAutenticado(
+        `/favoritos/${animalId}`,
+        {
+          method: 'DELETE',
+        }
+      );
+
+      await lerResposta(resposta);
+
+      // ATUALIZAR A LISTA SEM PRECISAR REABRIR A TELA
+      setFavoritos((listaAtual) =>
+        listaAtual.filter(
+          (favorito) =>
+            Number(favorito.animal_id) !== Number(animalId)
+        )
+      );
+
+      avisar(
+        'Favorito removido',
+        'O animal foi removido dos seus favoritos.'
+      );
+    } catch (erroRequisicao) {
+      avisar(
+        'Erro',
+        erroRequisicao.message ||
+          'Não foi possível remover o favorito.'
+      );
+    } finally {
+      setRemovendoId(null);
+    }
+  }
+
+  function formatarIdade(idade, unidade) {
+    if (idade === null || idade === undefined) {
+      return 'Idade não informada';
+    }
+
+    const numero = Number(idade);
+    const tipo = unidade || 'anos';
+
+    if (tipo === 'meses' || tipo === 'mes') {
+      return `${numero} ${numero === 1 ? 'mês' : 'meses'}`;
+    }
+
+    return `${numero} ${numero === 1 ? 'ano' : 'anos'}`;
+  }
+
+  function nomeStatus(status) {
+    switch (status) {
+      case 'disponivel':
+        return 'Disponível para adoção';
+
+      case 'em_processo':
+        return 'Em processo de adoção';
+
+      case 'adotado':
+        return 'Adotado';
+
+      default:
+        return 'Status não informado';
+    }
+  }
+
+  function corStatus(status) {
+    switch (status) {
+      case 'disponivel':
+        return '#25805A';
+
+      case 'em_processo':
+        return '#B7791F';
+
+      case 'adotado':
+        return '#607D8B';
+
+      default:
+        return '#607D8B';
+    }
+  }
+
+  if (carregando) {
+    return (
+      <View style={estilos.centralizado}>
+        <ActivityIndicator
+          size="large"
+          color={cores.primaria}
+        />
+
+        <Text style={estilos.textoAuxiliar}>
+          Carregando seus favoritos...
+        </Text>
+      </View>
+    );
+  }
+
+  return (
+    <ScrollView
+      style={estilos.container}
+      contentContainerStyle={estilos.conteudo}
+      refreshControl={
+        <RefreshControl
+          refreshing={atualizando}
+          onRefresh={() => carregarFavoritos(false)}
+        />
+      }
+    >
+      <Text style={estilos.titulo}>
+        Meus favoritos
+      </Text>
+
+      <Text style={estilos.subtitulo}>
+        Aqui ficam os animais que chamaram sua atenção.
+        Você pode voltar para conhecer melhor cada um deles.
+      </Text>
+
+      {erro ? (
+        <View style={estilos.cartaoVazio}>
+          <Text style={estilos.textoErro}>
+            {erro}
+          </Text>
+
+          <Botao
+            titulo="Tentar novamente"
+            onPress={() => carregarFavoritos()}
+          />
+        </View>
+      ) : favoritos.length === 0 ? (
+        <View style={estilos.cartaoVazio}>
+          <Text style={estilos.tituloVazio}>
+            Você ainda não tem favoritos
+          </Text>
+
+          <Text style={estilos.textoAuxiliar}>
+            Explore os animais disponíveis e salve aqueles
+            que você gostaria de conhecer melhor.
+          </Text>
+
+          <View style={estilos.espacoBotao}>
+            <Botao
+              titulo="Conhecer animais"
+              onPress={() => navigation.navigate('Animais')}
+            />
+          </View>
+        </View>
+      ) : (
+        <>
+          <Text style={estilos.quantidade}>
+            {favoritos.length}{' '}
+            {favoritos.length === 1
+              ? 'animal salvo'
+              : 'animais salvos'}
+          </Text>
+
+          {favoritos.map((animal) => {
+            const removendo = removendoId === animal.animal_id;
+
+            return (
+              <View
+                key={animal.id}
+                style={estilos.cartao}
+              >
+                {animal.foto ? (
+                  <Image
+                    source={{ uri: animal.foto }}
+                    style={estilos.foto}
+                    resizeMode="cover"
+                  />
+                ) : (
+                  <View style={estilos.semFoto}>
+                    <Text style={estilos.textoSemFoto}>
+                      Foto não disponível
+                    </Text>
+                  </View>
+                )}
+
+                <View style={estilos.informacoes}>
+                  <View style={estilos.cabecalho}>
+                    <Text style={estilos.nomeAnimal}>
+                      {animal.nome}
+                    </Text>
+
+                    <View
+                      style={[
+                        estilos.etiqueta,
+                        {
+                          backgroundColor:
+                            corStatus(animal.status) + '18',
+                        },
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          estilos.textoEtiqueta,
+                          {
+                            color: corStatus(animal.status),
+                          },
+                        ]}
+                      >
+                        {nomeStatus(animal.status)}
+                      </Text>
+                    </View>
+                  </View>
+
+                  <Text style={estilos.detalhes}>
+                    {animal.especie}
+                    {animal.raca ? ` • ${animal.raca}` : ''}
+                  </Text>
+
+                  <Text style={estilos.detalhes}>
+                    {formatarIdade(
+                      animal.idade,
+                      animal.unidade_idade
+                    )}
+                    {animal.porte ? ` • Porte ${animal.porte}` : ''}
+                  </Text>
+
+                  {animal.cidade ? (
+                    <Text style={estilos.detalhes}>
+                      Localização: {animal.cidade}
+                    </Text>
+                  ) : null}
+
+                  {animal.descricao ? (
+                    <Text
+                      style={estilos.descricao}
+                      numberOfLines={3}
+                    >
+                      {animal.descricao}
+                    </Text>
+                  ) : null}
+
+                  <View style={estilos.espacoBotao}>
+                    <Botao
+                      titulo="Ver detalhes"
+                      onPress={() =>
+                        navigation.navigate(
+                          'DetalhesAnimal',
+                          {
+                            id: animal.animal_id,
+                          }
+                        )
+                      }
+                    />
+                  </View>
+
+                  <View style={estilos.espacoBotao}>
+                    <Botao
+                      titulo={
+                        removendo
+                          ? 'Removendo...'
+                          : 'Remover dos favoritos'
+                      }
+                      variante="secundario"
+                      disabled={removendoId !== null}
+                      carregando={removendo}
+                      onPress={() =>
+                        confirmarRemocao(
+                          animal.animal_id,
+                          animal.nome
+                        )
+                      }
+                    />
+                  </View>
+                </View>
+              </View>
+            );
+          })}
+        </>
+      )}
+    </ScrollView>
+  );
+}
+
+const estilos = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: '#F8F9FA',
+  },
+
+  conteudo: {
+    padding: 20,
+    paddingBottom: 40,
+  },
+
+  centralizado: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 24,
+    gap: 14,
+    backgroundColor: '#F8F9FA',
+  },
+
+  titulo: {
+    fontSize: 26,
+    fontWeight: 'bold',
+    color: '#263238',
+    marginBottom: 10,
+  },
+
+  subtitulo: {
+    fontSize: 15,
+    color: '#607D8B',
+    lineHeight: 22,
+    marginBottom: 24,
+  },
+
+  quantidade: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#607D8B',
+    marginBottom: 16,
+  },
+
+  cartao: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 14,
+    marginBottom: 20,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+  },
+
+  foto: {
+    width: '100%',
+    height: 220,
+  },
+
+  semFoto: {
+    height: 180,
+    backgroundColor: '#EAF4F0',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+
+  textoSemFoto: {
+    fontSize: 14,
+    color: '#607D8B',
+  },
+
+  informacoes: {
+    padding: 18,
+  },
+
+  cabecalho: {
+    marginBottom: 12,
+  },
+
+  nomeAnimal: {
+    fontSize: 22,
+    fontWeight: 'bold',
+    color: '#263238',
+    marginBottom: 10,
+  },
+
+  etiqueta: {
+    alignSelf: 'flex-start',
+    borderRadius: 20,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+  },
+
+  textoEtiqueta: {
+    fontSize: 12,
+    fontWeight: 'bold',
+  },
+
+  detalhes: {
+    fontSize: 14,
+    color: '#607D8B',
+    marginBottom: 7,
+  },
+
+  descricao: {
+    fontSize: 14,
+    color: '#455A64',
+    lineHeight: 21,
+    marginTop: 10,
+  },
+
+  espacoBotao: {
+    marginTop: 12,
+  },
+
+  cartaoVazio: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 14,
+    padding: 25,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+  },
+
+  tituloVazio: {
+    fontSize: 19,
+    fontWeight: 'bold',
+    color: '#263238',
+    textAlign: 'center',
+    marginBottom: 12,
+  },
+
+  textoAuxiliar: {
+    fontSize: 14,
+    color: '#607D8B',
+    textAlign: 'center',
+    lineHeight: 21,
+  },
+
+  textoErro: {
+    fontSize: 14,
+    color: '#B54747',
+    textAlign: 'center',
+    marginBottom: 16,
+  },
+
+});
+```
+
+
+### petmatch/screens/Home.js
+
+```js
+
+import { useCallback, useState } from 'react';
+import {
+  ActivityIndicator,
+  Image,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  useWindowDimensions,
+  View,
+} from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
+import { useFocusEffect } from '@react-navigation/native';
+
+import {
+  fetchAutenticado,
+  lerResposta,
+} from '../services/api.js';
+
+const C = {
+  fundo: '#FAF8F3',
+  branco: '#FFFFFF',
+  laranja: '#FF7628',
+  verde: '#579F13',
+  texto: '#252B35',
+  secundario: '#737984',
+  borda: '#E9E5DE',
+  verdeClaro: '#EDF5E5',
+};
+
+const FOTO_CAPA =
+  'https://images.unsplash.com/photo-1548199973-03cce0bbc87b?w=1200&auto=format&fit=crop&q=85';
+
+function listaAnimais(dados) {
+  if (Array.isArray(dados)) return dados;
+  if (Array.isArray(dados?.animais)) return dados.animais;
+  if (Array.isArray(dados?.dados)) return dados.dados;
+  return [];
+}
+
+function fotoAnimal(animal) {
+  const foto =
+    animal?.imagem ||
+    animal?.foto ||
+    animal?.foto_url ||
+    animal?.imagem_url;
+
+  if (typeof foto !== 'string' || !foto.trim()) {
+    return null;
+  }
+
+  return foto.trim();
+}
+
+function nomeEspecie(animal) {
+  const especie = String(
+    animal?.especie || animal?.tipo || ''
+  ).toLowerCase();
+
+  if (especie.includes('cach') || especie.includes('canin')) {
+    return 'Cachorro';
+  }
+
+  if (especie.includes('gat') || especie.includes('felin')) {
+    return 'Gato';
+  }
+
+  return animal?.especie || animal?.tipo || 'Pet';
+}
+
+function informacaoAnimal(animal) {
+  return [
+    nomeEspecie(animal),
+    animal?.idade ? String(animal.idade) : null,
+    animal?.cidade ? String(animal.cidade) : null,
+  ]
+    .filter(Boolean)
+    .join(' • ');
+}
+
+function BotaoMenu({ titulo, ativo, onPress, icone }) {
+  return (
+    <Pressable
+      onPress={onPress}
+      style={[
+        css.menuBotao,
+        ativo && css.menuBotaoAtivo,
+      ]}
+      accessibilityRole="button"
+    >
+      {icone ? (
+        <Ionicons
+          name={icone}
+          size={17}
+          color={ativo ? C.laranja : C.texto}
+        />
+      ) : null}
+
+      <Text
+        style={[
+          css.menuTexto,
+          ativo && css.menuTextoAtivo,
+        ]}
+      >
+        {titulo}
+      </Text>
+    </Pressable>
+  );
+}
+
+export default function Home({
+  navigation,
+  usuario,
+  sair,
+  atualizarUsuario,
+  aviso,
+}) {
+  const { width } = useWindowDimensions();
+
+  const desktop = width >= 900;
+  const tablet = width >= 620;
+  const colunas = desktop ? 3 : tablet ? 2 : 1;
+
+  const [animais, setAnimais] = useState([]);
+  const [carregando, setCarregando] = useState(true);
+  const [erro, setErro] = useState('');
+  const [busca, setBusca] = useState('');
+  const [tipo, setTipo] = useState('Todos');
+  const [aba, setAba] = useState('Inicio');
+  const [favoritos, setFavoritos] = useState([]);
+
+  const podeGerenciar =
+    usuario?.nivel === 'ong' ||
+    usuario?.nivel === 'protetor' ||
+    usuario?.nivel === 'admin';
+
+  const admin = usuario?.nivel === 'admin';
+
+  const nomeUsuario =
+    usuario?.nome?.trim()?.split(' ')[0] || 'Usuário';
+
+  const carregarDados = useCallback(async () => {
+    try {
+      const resposta = await fetchAutenticado('/animais');
+      const dados = await lerResposta(resposta);
+
+      setAnimais(listaAnimais(dados));
+      setErro('');
+    } catch (falha) {
+      if (falha.status !== 401) {
+        setErro('Não foi possível carregar os animais.');
+      }
+    } finally {
+      setCarregando(false);
+    }
+  }, []);
+
+  const carregarFavoritos = useCallback(async () => {
+    try {
+      const resposta = await fetchAutenticado('/favoritos');
+      const dados = await lerResposta(resposta);
+
+      const lista = Array.isArray(dados)
+        ? dados
+        : Array.isArray(dados?.favoritos)
+          ? dados.favoritos
+          : [];
+
+      setFavoritos(
+        lista.map((item) =>
+          String(item.animal_id ?? item.animal?.id ?? item.id)
+        )
+      );
+    } catch {
+      // Os animais continuam visíveis mesmo se
+      // a lista de favoritos não carregar.
+    }
+  }, []);
+
+  useFocusEffect(
+    useCallback(() => {
+      let ativo = true;
+
+      async function atualizar() {
+        await Promise.all([
+          carregarDados(),
+          carregarFavoritos(),
+        ]);
+
+        try {
+          const resposta = await fetchAutenticado('/auth/me');
+          const dados = await lerResposta(resposta);
+
+          if (ativo && atualizarUsuario) {
+            atualizarUsuario(dados.usuario || dados);
+          }
+        } catch {
+          // A autenticação é tratada pelo serviço.
+        }
+      }
+
+      atualizar();
+
+      return () => {
+        ativo = false;
+      };
+    }, [carregarDados, carregarFavoritos, atualizarUsuario])
+  );
+
+  function abrirAnimais() {
+    navigation.navigate('Animais');
+  }
+
+  function abrirPerfil() {
+    navigation.navigate('Perfil');
+  }
+
+  function abrirDetalhes(animal) {
+    navigation.navigate('DetalhesAnimal', {
+      animalId: animal.id,
+      id: animal.id,
+      animal,
+    });
+  }
+
+  async function alternarFavorito(animal) {
+    const id = String(animal.id);
+    const jaFavorito = favoritos.includes(id);
+
+    try {
+      const resposta = await fetchAutenticado(
+        jaFavorito ? `/favoritos/${animal.id}` : '/favoritos',
+        {
+          method: jaFavorito ? 'DELETE' : 'POST',
+          ...(!jaFavorito
+            ? {
+                headers: {
+                  'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                  animal_id: animal.id,
+                }),
+              }
+            : {}),
+        }
+      );
+
+      await lerResposta(resposta);
+
+      setFavoritos((anteriores) =>
+        jaFavorito
+          ? anteriores.filter((item) => item !== id)
+          : [...anteriores, id]
+      );
+    } catch (falha) {
+      setErro(
+        falha.message || 'Não foi possível atualizar o favorito.'
+      );
+    }
+  }
+
+  const animaisFiltrados = animais.filter((animal) => {
+    const especie = nomeEspecie(animal);
+    const correspondeTipo =
+      tipo === 'Todos' || especie === tipo;
+
+    const texto = [
+      animal.nome,
+      animal.raca,
+      animal.cidade,
+      especie,
+    ]
+      .filter(Boolean)
+      .join(' ')
+      .toLowerCase();
+
+    return (
+      correspondeTipo &&
+      texto.includes(busca.trim().toLowerCase())
+    );
+  });
+
+  const destaques = animaisFiltrados.slice(0, 6);
+
+  return (
+    <View style={css.tela}>
+      <ScrollView
+        contentContainerStyle={css.scroll}
+        keyboardShouldPersistTaps="handled"
+      >
+        {/* CABEÇALHO */}
+        <View style={css.cabecalho}>
+          <View style={css.largura}>
+            <View
+              style={[
+                css.cabecalhoInterno,
+                !desktop && css.cabecalhoMobile,
+              ]}
+            >
+              <Pressable
+                style={css.marca}
+                onPress={() => setAba('Inicio')}
+              >
+                <View style={css.logoIcone}>
+                  <Ionicons
+                    name="paw"
+                    size={23}
+                    color="#FFFFFF"
+                  />
+                </View>
+
+                <View>
+                  <Text style={css.logoNome}>
+                    Pet
+                    <Text style={css.logoLaranja}>
+                      Match
+                    </Text>
+                  </Text>
+                  <Text style={css.logoDescricao}>
+                    Conectando pets a novos lares
+                  </Text>
+                </View>
+              </Pressable>
+
+              <View style={css.menu}>
+                <BotaoMenu
+                  titulo="Início"
+                  ativo={aba === 'Inicio'}
+                  onPress={() => setAba('Inicio')}
+                />
+
+                <BotaoMenu
+                  titulo="Animais"
+                  onPress={abrirAnimais}
+                />
+
+                <BotaoMenu
+                  titulo="Sobre"
+                  ativo={aba === 'Sobre'}
+                  onPress={() => setAba('Sobre')}
+                />
+
+                <BotaoMenu
+                  titulo="Contato"
+                  ativo={aba === 'Contato'}
+                  onPress={() => setAba('Contato')}
+                />
+              </View>
+
+              <View style={css.menuConta}>
+                <BotaoMenu
+                  titulo={desktop ? 'Perfil' : nomeUsuario}
+                  icone="person-outline"
+                  onPress={abrirPerfil}
+                />
+
+                <Pressable
+                  onPress={sair}
+                  style={css.botaoSair}
+                >
+                  <Ionicons
+                    name="log-out-outline"
+                    size={17}
+                    color={C.secundario}
+                  />
+                  <Text style={css.botaoSairTexto}>
+                    Sair
+                  </Text>
+                </Pressable>
+              </View>
+            </View>
+          </View>
+        </View>
+
+        {!!(erro || aviso) && (
+          <View style={css.largura}>
+            <View style={css.aviso}>
+              <Text style={css.avisoTexto}>
+                {erro || aviso}
+              </Text>
+            </View>
+          </View>
+        )}
+
+        {aba === 'Inicio' && (
+          <>
+            {/* HERO */}
+            <View style={css.largura}>
+              <View
+                style={[
+                  css.hero,
+                  !desktop && css.heroMobile,
+                ]}
+              >
+                <View style={css.heroConteudo}>
+                  <View style={css.etiqueta}>
+                    <Ionicons
+                      name="paw-outline"
+                      size={14}
+                      color={C.verde}
+                    />
+                    <Text style={css.etiquetaTexto}>
+                      ADOÇÃO RESPONSÁVEL
+                    </Text>
+                  </View>
+
+                  <Text
+                    style={[
+                      css.heroTitulo,
+                      !desktop && css.heroTituloMobile,
+                    ]}
+                  >
+                    Conectando pets a{' '}
+                    <Text style={css.textoLaranja}>
+                      novos lares.
+                    </Text>
+                  </Text>
+
+                  <Text style={css.heroDescricao}>
+                    Encontre seu novo melhor amigo e
+                    transforme duas vidas para sempre.
+                  </Text>
+
+                  <Text style={css.heroComplemento}>
+                    Conheça animais que esperam por uma
+                    família e dê o primeiro passo para
+                    uma adoção responsável.
+                  </Text>
+
+                  <Pressable
+                    style={css.botaoVerde}
+                    onPress={abrirAnimais}
+                  >
+                    <Text style={css.botaoVerdeTexto}>
+                      Ver todos os animais
+                    </Text>
+                    <Ionicons
+                      name="arrow-forward"
+                      size={17}
+                      color="#FFFFFF"
+                    />
+                  </Pressable>
+                </View>
+
+                <View style={css.heroImagemContainer}>
+                  <Image
+                    source={{ uri: FOTO_CAPA }}
+                    style={css.heroImagem}
+                    resizeMode="cover"
+                  />
+                </View>
+              </View>
+            </View>
+
+            {/* BUSCA */}
+            <View style={css.largura}>
+              <View style={css.buscaCartao}>
+                <View style={css.buscaTituloLinha}>
+                  <View>
+                    <Text style={css.buscaTitulo}>
+                      Encontre seu novo amigo
+                    </Text>
+                    <Text style={css.buscaDescricao}>
+                      Pesquise pelo nome, raça ou cidade.
+                    </Text>
+                  </View>
+                </View>
+
+                <View
+                  style={[
+                    css.buscaLinha,
+                    !tablet && css.buscaLinhaMobile,
+                  ]}
+                >
+                  <View style={css.campoBusca}>
+                    <Ionicons
+                      name="search-outline"
+                      size={19}
+                      color={C.secundario}
+                    />
+                    <TextInput
+                      value={busca}
+                      onChangeText={setBusca}
+                      placeholder="Nome, raça ou cidade..."
+                      placeholderTextColor="#9DA2AA"
+                      style={css.inputBusca}
+                    />
+                  </View>
+
+                  <View style={css.filtros}>
+                    {['Todos', 'Cachorro', 'Gato'].map(
+                      (opcao) => (
+                        <Pressable
+                          key={opcao}
+                          onPress={() => setTipo(opcao)}
+                          style={[
+                            css.filtro,
+                            tipo === opcao &&
+                              css.filtroAtivo,
+                          ]}
+                        >
+                          <Text
+                            style={[
+                              css.filtroTexto,
+                              tipo === opcao &&
+                                css.filtroTextoAtivo,
+                            ]}
+                          >
+                            {opcao}
+                          </Text>
+                        </Pressable>
+                      )
+                    )}
+                  </View>
+                </View>
+              </View>
+            </View>
+
+            {/* ANIMAIS EM DESTAQUE */}
+            <View style={css.largura}>
+              <View style={css.secao}>
+                <View style={css.secaoCabecalho}>
+                  <View style={css.secaoTexto}>
+                    <Text style={css.secaoEtiqueta}>
+                      CONHEÇA QUEM ESTÁ ESPERANDO
+                    </Text>
+                    <Text style={css.secaoTitulo}>
+                      Animais para adoção
+                    </Text>
+                    <Text style={css.secaoDescricao}>
+                      Talvez seu próximo companheiro
+                      esteja aqui.
+                    </Text>
+                  </View>
+
+                  <Pressable
+                    style={css.linkVerTodos}
+                    onPress={abrirAnimais}
+                  >
+                    <Text style={css.linkVerTodosTexto}>
+                      Ver todos
+                    </Text>
+                    <Ionicons
+                      name="arrow-forward"
+                      size={17}
+                      color={C.laranja}
+                    />
+                  </Pressable>
+                </View>
+
+                {carregando ? (
+                  <View style={css.estadoVazio}>
+                    <ActivityIndicator
+                      color={C.laranja}
+                      size="large"
+                    />
+                    <Text style={css.estadoTexto}>
+                      Carregando animais...
+                    </Text>
+                  </View>
+                ) : destaques.length === 0 ? (
+                  <View style={css.estadoVazio}>
+                    <Ionicons
+                      name="paw-outline"
+                      size={35}
+                      color={C.verde}
+                    />
+                    <Text style={css.estadoTitulo}>
+                      Nenhum animal encontrado
+                    </Text>
+                    <Text style={css.estadoTexto}>
+                      {busca || tipo !== 'Todos'
+                        ? 'Tente mudar os filtros da pesquisa.'
+                        : 'Ainda não há animais cadastrados.'}
+                    </Text>
+                  </View>
+                ) : (
+                  <View style={css.grade}>
+                    {destaques.map((animal) => {
+                      const imagem = fotoAnimal(animal);
+                      const favorito = favoritos.includes(
+                        String(animal.id)
+                      );
+
+                      return (
+                        <View
+                          key={String(animal.id)}
+                          style={[
+                            css.cartaoAnimal,
+                            {
+                              width: tablet
+                                ? `${100 / colunas - 2}%`
+                                : '100%',
+                            },
+                          ]}
+                        >
+                          <Pressable
+                            onPress={() =>
+                              abrirDetalhes(animal)
+                            }
+                          >
+                            <View style={css.imagemAnimal}>
+                              {imagem ? (
+                                <Image
+                                  source={{ uri: imagem }}
+                                  style={css.fotoAnimal}
+                                  resizeMode="cover"
+                                />
+                              ) : (
+                                <View
+                                  style={css.semFoto}
+                                >
+                                  <Ionicons
+                                    name="paw-outline"
+                                    size={42}
+                                    color="#B9C7AC"
+                                  />
+                                  <Text
+                                    style={css.semFotoTexto}
+                                  >
+                                    Sem foto
+                                  </Text>
+                                </View>
+                              )}
+                            </View>
+                          </Pressable>
+
+                          <Pressable
+                            onPress={() =>
+                              alternarFavorito(animal)
+                            }
+                            style={css.favoritar}
+                            accessibilityRole="button"
+                            accessibilityLabel={
+                              favorito
+                                ? 'Remover dos favoritos'
+                                : 'Adicionar aos favoritos'
+                            }
+                          >
+                            <Ionicons
+                              name={
+                                favorito
+                                  ? 'heart'
+                                  : 'heart-outline'
+                              }
+                              size={20}
+                              color={
+                                favorito
+                                  ? C.laranja
+                                  : C.texto
+                              }
+                            />
+                          </Pressable>
+
+                          <View style={css.animalConteudo}>
+                            <Text style={css.animalNome}>
+                              {animal.nome || 'Sem nome'}
+                            </Text>
+
+                            <Text
+                              style={css.animalDescricao}
+                              numberOfLines={2}
+                            >
+                              {informacaoAnimal(animal)}
+                            </Text>
+
+                            <Pressable
+                              style={css.botaoDetalhes}
+                              onPress={() =>
+                                abrirDetalhes(animal)
+                              }
+                            >
+                              <Text
+                                style={css.botaoDetalhesTexto}
+                              >
+                                Conhecer
+                              </Text>
+                              <Ionicons
+                                name="arrow-forward"
+                                size={16}
+                                color={C.laranja}
+                              />
+                            </Pressable>
+                          </View>
+                        </View>
+                      );
+                    })}
+                  </View>
+                )}
+              </View>
+            </View>
+
+            {/* SOBRE O PROJETO */}
+            <View style={css.secaoSobre}>
+              <View style={css.largura}>
+                <View style={css.sobreInterno}>
+                  <Text style={css.secaoEtiqueta}>
+                    SOBRE O PETMATCH
+                  </Text>
+                  <Text style={css.secaoTitulo}>
+                    Uma conexão que muda vidas
+                  </Text>
+                  <Text style={css.sobreDescricao}>
+                    O PetMatch foi criado para facilitar
+                    o encontro entre pessoas interessadas
+                    em adotar e animais divulgados por
+                    ONGs e protetores independentes.
+                  </Text>
+
+                  <View style={css.passos}>
+                    {[
+                      {
+                        icone: 'search-outline',
+                        titulo: 'Encontre',
+                        texto: 'Conheça os animais disponíveis para adoção.',
+                      },
+                      {
+                        icone: 'bookmark-outline',
+                        titulo: 'Favorite',
+                        texto: 'Salve os animais que chamaram sua atenção.',
+                      },
+                      {
+                        icone: 'home-outline',
+                        titulo: 'Adote',
+                        texto: 'Entre com uma solicitação de adoção.',
+                      },
+                    ].map((passo) => (
+                      <View
+                        key={passo.titulo}
+                        style={css.passo}
+                      >
+                        <View style={css.passoIcone}>
+                          <Ionicons
+                            name={passo.icone}
+                            size={23}
+                            color={C.verde}
+                          />
+                        </View>
+                        <Text style={css.passoTitulo}>
+                          {passo.titulo}
+                        </Text>
+                        <Text style={css.passoTexto}>
+                          {passo.texto}
+                        </Text>
+                      </View>
+                    ))}
+                  </View>
+                </View>
+              </View>
+            </View>
+
+            {/* GERENCIAMENTO */}
+            {podeGerenciar && (
+              <View style={css.largura}>
+                <View style={css.gerenciamento}>
+                  <View style={css.gerenciamentoTexto}>
+                    <Text style={css.secaoEtiqueta}>
+                      ÁREA DE GERENCIAMENTO
+                    </Text>
+                    <Text style={css.gerenciamentoTitulo}>
+                      Gerencie os animais cadastrados
+                    </Text>
+                    <Text style={css.gerenciamentoDescricao}>
+                      Adicione novos animais e mantenha
+                      os anúncios atualizados.
+                    </Text>
+                  </View>
+
+                  <View style={css.gerenciamentoBotoes}>
+                    <Pressable
+                      style={css.botaoLaranja}
+                      onPress={() =>
+                        navigation.navigate(
+                          'CadastrarAnimal'
+                        )
+                      }
+                    >
+                      <Ionicons
+                        name="add"
+                        size={18}
+                        color="#FFFFFF"
+                      />
+                      <Text style={css.botaoLaranjaTexto}>
+                        Cadastrar animal
+                      </Text>
+                    </Pressable>
+
+                    {admin && (
+                      <Pressable
+                        style={css.botaoContorno}
+                        onPress={() =>
+                          navigation.navigate('Usuarios')
+                        }
+                      >
+                        <Ionicons
+                          name="people-outline"
+                          size={17}
+                          color={C.laranja}
+                        />
+                        <Text
+                          style={css.botaoContornoTexto}
+                        >
+                          Gerenciar usuários
+                        </Text>
+                      </Pressable>
+                    )}
+                  </View>
+                </View>
+              </View>
+            )}
+          </>
+        )}
+
+        {aba === 'Sobre' && (
+          <View style={css.largura}>
+            <View style={css.paginaInterna}>
+              <Text style={css.secaoEtiqueta}>
+                CONHEÇA O PETMATCH
+              </Text>
+              <Text style={css.secaoTitulo}>
+                Sobre o projeto
+              </Text>
+              <Text style={css.sobreDescricao}>
+                O PetMatch busca facilitar a adoção
+                responsável de cães e gatos, aproximando
+                pessoas interessadas em adotar de ONGs e
+                protetores independentes.
+              </Text>
+
+              <View style={css.passos}>
+                {[
+                  {
+                    icone: 'search-outline',
+                    titulo: 'Encontre',
+                    texto: 'Explore os animais cadastrados na plataforma.',
+                  },
+                  {
+                    icone: 'bookmark-outline',
+                    titulo: 'Favorite',
+                    texto: 'Guarde seus animais preferidos para consultar depois.',
+                  },
+                  {
+                    icone: 'home-outline',
+                    titulo: 'Solicite a adoção',
+                    texto: 'Preencha uma solicitação para iniciar o processo.',
+                  },
+                ].map((item) => (
+                  <View
+                    key={item.titulo}
+                    style={css.passo}
+                  >
+                    <View style={css.passoIcone}>
+                      <Ionicons
+                        name={item.icone}
+                        size={24}
+                        color={C.verde}
+                      />
+                    </View>
+                    <Text style={css.passoTitulo}>
+                      {item.titulo}
+                    </Text>
+                    <Text style={css.passoTexto}>
+                      {item.texto}
+                    </Text>
+                  </View>
+                ))}
+              </View>
+
+              <Pressable
+                style={[
+                  css.botaoVerde,
+                  { alignSelf: 'flex-start', marginTop: 28 },
+                ]}
+                onPress={abrirAnimais}
+              >
+                <Text style={css.botaoVerdeTexto}>
+                  Conhecer os animais
+                </Text>
+              </Pressable>
+            </View>
+          </View>
+        )}
+
+        {aba === 'Contato' && (
+          <View style={css.largura}>
+            <View style={css.paginaInterna}>
+              <Text style={css.secaoEtiqueta}>
+                ENTRE EM CONTATO
+              </Text>
+              <Text style={css.secaoTitulo}>
+                Fale com o PetMatch
+              </Text>
+              <Text style={css.sobreDescricao}>
+                Precisa de informações sobre um animal
+                ou sobre o processo de adoção? Acesse o
+                perfil do animal para consultar os dados
+                disponíveis e iniciar uma solicitação.
+              </Text>
+
+              <Pressable
+                style={[
+                  css.botaoVerde,
+                  { alignSelf: 'flex-start', marginTop: 25 },
+                ]}
+                onPress={abrirAnimais}
+              >
+                <Text style={css.botaoVerdeTexto}>
+                  Ver animais disponíveis
+                </Text>
+              </Pressable>
+
+              <Text style={css.contatoNota}>
+                O formulário de contato será conectado
+                quando configurarmos o serviço de
+                recebimento de mensagens.
+              </Text>
+            </View>
+          </View>
+        )}
+
+        {/* RODAPÉ */}
+        <View style={css.rodape}>
+          <View style={css.largura}>
+            <View style={css.rodapeInterno}>
+              <Text style={css.rodapeMarca}>
+                Pet<Text style={css.logoLaranja}>Match</Text>
+              </Text>
+              <Text style={css.rodapeTexto}>
+                Conectando pets a novos lares.
+              </Text>
+            </View>
+          </View>
+        </View>
+      </ScrollView>
+    </View>
+  );
+}
+
+const css = StyleSheet.create({
+  tela: {
+    flex: 1,
+    backgroundColor: C.fundo,
+  },
+  scroll: {
+    flexGrow: 1,
+  },
+  largura: {
+    width: '100%',
+    maxWidth: 1140,
+    alignSelf: 'center',
+    paddingHorizontal: 22,
+  },
+
+  cabecalho: {
+    backgroundColor: C.branco,
+    borderBottomWidth: 1,
+    borderBottomColor: C.borda,
+  },
+  cabecalhoInterno: {
+    minHeight: 76,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 18,
+  },
+  cabecalhoMobile: {
+    flexWrap: 'wrap',
+    paddingVertical: 14,
+    gap: 12,
+  },
+  marca: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  logoIcone: {
+    width: 39,
+    height: 39,
+    borderRadius: 11,
+    backgroundColor: C.laranja,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  logoNome: {
+    fontSize: 23,
+    fontWeight: '900',
+    color: C.texto,
+    letterSpacing: -0.7,
+  },
+  logoLaranja: {
+    color: C.laranja,
+  },
+  logoDescricao: {
+    fontSize: 10,
+    color: C.secundario,
+  },
+  menu: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: 5,
+  },
+  menuConta: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  menuBotao: {
+    paddingVertical: 9,
+    paddingHorizontal: 11,
+    borderRadius: 9,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  menuBotaoAtivo: {
+    backgroundColor: '#FFF2E9',
+  },
+  menuTexto: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: C.texto,
+  },
+  menuTextoAtivo: {
+    color: C.laranja,
+  },
+  botaoSair: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    padding: 8,
+  },
+  botaoSairTexto: {
+    fontSize: 12,
+    color: C.secundario,
+  },
+
+  aviso: {
+    backgroundColor: '#FFF1EA',
+    padding: 12,
+    borderRadius: 10,
+    marginTop: 16,
+  },
+  avisoTexto: {
+    color: '#A14D20',
+    fontSize: 12,
+  },
+
+  hero: {
+    flexDirection: 'row',
+    backgroundColor: '#FFF1E7',
+    borderRadius: 24,
+    overflow: 'hidden',
+    marginTop: 30,
+    minHeight: 340,
+  },
+  heroMobile: {
+    flexDirection: 'column',
+  },
+  heroConteudo: {
+    flex: 1,
+    padding: 36,
+    justifyContent: 'center',
+    alignItems: 'flex-start',
+  },
+  etiqueta: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 7,
+    backgroundColor: '#EAF3DE',
+    paddingVertical: 7,
+    paddingHorizontal: 11,
+    borderRadius: 30,
+    marginBottom: 18,
+  },
+  etiquetaTexto: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: C.verde,
+    letterSpacing: 0.4,
+  },
+  heroTitulo: {
+    color: C.texto,
+    fontSize: 39,
+    lineHeight: 47,
+    fontWeight: '900',
+    letterSpacing: -1.1,
+    maxWidth: 510,
+  },
+  heroTituloMobile: {
+    fontSize: 31,
+    lineHeight: 38,
+  },
+  textoLaranja: {
+    color: C.laranja,
+  },
+  heroDescricao: {
+    color: C.texto,
+    fontSize: 15,
+    lineHeight: 23,
+    marginTop: 15,
+    maxWidth: 430,
+  },
+  heroComplemento: {
+    color: C.secundario,
+    fontSize: 12,
+    lineHeight: 20,
+    marginTop: 10,
+    maxWidth: 410,
+  },
+  botaoVerde: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 9,
+    backgroundColor: C.verde,
+    paddingHorizontal: 21,
+    height: 45,
+    borderRadius: 11,
+    marginTop: 22,
+  },
+  botaoVerdeTexto: {
+    color: C.branco,
+    fontWeight: '800',
+    fontSize: 13,
+  },
+  heroImagemContainer: {
+    flex: 0.85,
+    minHeight: 245,
+    backgroundColor: '#E8E3D9',
+  },
+  heroImagem: {
+    width: '100%',
+    height: '100%',
+    minHeight: 245,
+  },
+
+  buscaCartao: {
+    backgroundColor: C.branco,
+    borderRadius: 18,
+    padding: 24,
+    marginTop: 25,
+    borderWidth: 1,
+    borderColor: C.borda,
+  },
+  buscaTituloLinha: {
+    marginBottom: 17,
+  },
+  buscaTitulo: {
+    fontSize: 19,
+    fontWeight: '800',
+    color: C.texto,
+  },
+  buscaDescricao: {
+    fontSize: 12,
+    color: C.secundario,
+    marginTop: 5,
+  },
+  buscaLinha: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 15,
+  },
+  buscaLinhaMobile: {
+    flexDirection: 'column',
+    alignItems: 'stretch',
+  },
+  campoBusca: {
+    flex: 1,
+    minHeight: 45,
+    borderWidth: 1,
+    borderColor: C.borda,
+    borderRadius: 11,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 13,
+    gap: 9,
+  },
+  inputBusca: {
+    flex: 1,
+    minWidth: 0,
+    fontSize: 13,
+    color: C.texto,
+    paddingVertical: 10,
+  },
+  filtros: {
+    flexDirection: 'row',
+    gap: 7,
+    flexWrap: 'wrap',
+  },
+  filtro: {
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    backgroundColor: '#F7F7F5',
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: C.borda,
+  },
+  filtroAtivo: {
+    backgroundColor: C.laranja,
+    borderColor: C.laranja,
+  },
+  filtroTexto: {
+    color: C.texto,
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  filtroTextoAtivo: {
+    color: C.branco,
+  },
+
+  secao: {
+    paddingVertical: 45,
+  },
+  secaoCabecalho: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    justifyContent: 'space-between',
+    flexWrap: 'wrap',
+    gap: 15,
+    marginBottom: 23,
+  },
+  secaoTexto: {
+    flex: 1,
+  },
+  secaoEtiqueta: {
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 1,
+    color: C.verde,
+    marginBottom: 10,
+  },
+  secaoTitulo: {
+    color: C.texto,
+    fontSize: 27,
+    fontWeight: '900',
+    letterSpacing: -0.6,
+  },
+  secaoDescricao: {
+    color: C.secundario,
+    fontSize: 13,
+    marginTop: 8,
+  },
+  linkVerTodos: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 7,
+    paddingVertical: 8,
+  },
+  linkVerTodosTexto: {
+    color: C.laranja,
+    fontWeight: '800',
+    fontSize: 13,
+  },
+
+  grade: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 18,
+  },
+  cartaoAnimal: {
+    backgroundColor: C.branco,
+    borderRadius: 17,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: C.borda,
+    position: 'relative',
+    marginBottom: 8,
+  },
+  imagemAnimal: {
+    height: 190,
+    backgroundColor: '#EEF0E9',
+  },
+  fotoAnimal: {
+    width: '100%',
+    height: '100%',
+  },
+  semFoto: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  semFotoTexto: {
+    color: C.secundario,
+    fontSize: 12,
+  },
+  favoritar: {
+    position: 'absolute',
+    top: 12,
+    right: 12,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: C.branco,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  animalConteudo: {
+    padding: 16,
+  },
+  animalNome: {
+    fontSize: 18,
+    fontWeight: '800',
+    color: C.texto,
+  },
+  animalDescricao: {
+    fontSize: 12,
+    color: C.secundario,
+    marginTop: 7,
+    lineHeight: 19,
+    minHeight: 20,
+  },
+  botaoDetalhes: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: 15,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: C.borda,
+  },
+  botaoDetalhesTexto: {
+    color: C.laranja,
+    fontSize: 13,
+    fontWeight: '800',
+  },
+
+  estadoVazio: {
+    paddingVertical: 50,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: C.branco,
+    borderRadius: 17,
+    gap: 10,
+    borderWidth: 1,
+    borderColor: C.borda,
+  },
+  estadoTitulo: {
+    fontSize: 17,
+    fontWeight: '800',
+    color: C.texto,
+  },
+  estadoTexto: {
+    color: C.secundario,
+    fontSize: 13,
+    textAlign: 'center',
+  },
+
+  secaoSobre: {
+    backgroundColor: '#F0F4EA',
+    paddingVertical: 45,
+  },
+  sobreInterno: {
+    alignItems: 'center',
+  },
+  sobreDescricao: {
+    color: C.secundario,
+    fontSize: 14,
+    lineHeight: 23,
+    maxWidth: 650,
+    textAlign: 'center',
+    marginTop: 13,
+  },
+  passos: {
+    width: '100%',
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+    gap: 16,
+    marginTop: 28,
+  },
+  passo: {
+    flexGrow: 1,
+    flexBasis: 210,
+    maxWidth: 340,
+    padding: 23,
+    backgroundColor: C.branco,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#E4E9DE',
+    alignItems: 'center',
+  },
+  passoIcone: {
+    width: 48,
+    height: 48,
+    borderRadius: 14,
+    backgroundColor: C.verdeClaro,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 13,
+  },
+  passoTitulo: {
+    fontSize: 16,
+    fontWeight: '800',
+    color: C.texto,
+  },
+  passoTexto: {
+    fontSize: 12,
+    lineHeight: 19,
+    color: C.secundario,
+    textAlign: 'center',
+    marginTop: 8,
+  },
+
+  gerenciamento: {
+    backgroundColor: C.branco,
+    borderWidth: 1,
+    borderColor: C.borda,
+    borderRadius: 17,
+    padding: 25,
+    marginVertical: 30,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    flexWrap: 'wrap',
+    gap: 18,
+  },
+  gerenciamentoTexto: {
+    flex: 1,
+    minWidth: 220,
+  },
+  gerenciamentoTitulo: {
+    fontSize: 19,
+    fontWeight: '800',
+    color: C.texto,
+  },
+  gerenciamentoDescricao: {
+    fontSize: 12,
+    color: C.secundario,
+    marginTop: 8,
+  },
+  gerenciamentoBotoes: {
+    gap: 9,
+  },
+  botaoLaranja: {
+    height: 43,
+    paddingHorizontal: 17,
+    borderRadius: 10,
+    backgroundColor: C.laranja,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 7,
+  },
+  botaoLaranjaTexto: {
+    color: C.branco,
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  botaoContorno: {
+    height: 43,
+    paddingHorizontal: 17,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: C.laranja,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 7,
+  },
+  botaoContornoTexto: {
+    color: C.laranja,
+    fontSize: 12,
+    fontWeight: '800',
+  },
+
+  paginaInterna: {
+    backgroundColor: C.branco,
+    borderRadius: 20,
+    padding: 35,
+    marginVertical: 30,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: C.borda,
+    minHeight: 300,
+  },
+  contatoNota: {
+    fontSize: 12,
+    color: C.secundario,
+    textAlign: 'center',
+    marginTop: 25,
+  },
+
+  rodape: {
+    backgroundColor: C.branco,
+    borderTopWidth: 1,
+    borderTopColor: C.borda,
+    marginTop: 20,
+  },
+  rodapeInterno: {
+    paddingVertical: 25,
+    alignItems: 'center',
+    gap: 5,
+  },
+  rodapeMarca: {
+    fontSize: 18,
+    fontWeight: '900',
+    color: C.texto,
+  },
+  rodapeTexto: {
+    fontSize: 11,
+    color: C.secundario,
+  },
+});
+```
+
+
+### petmatch/screens/Login.js
+
+```js
+
+import { useState } from 'react';
+import {
+  ActivityIndicator,
+  Image,
+  KeyboardAvoidingView,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  useWindowDimensions,
+  View,
+} from 'react-native';
+
+import { Ionicons } from '@expo/vector-icons';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { API, lerResposta } from '../services/api.js';
+
+const C = {
+  fundo: '#FAF8F3',
+  branco: '#FFFFFF',
+  laranja: '#FF7628',
+  laranjaClaro: '#FFF0E5',
+  verde: '#579F13',
+  texto: '#252B35',
+  secundario: '#737984',
+  borda: '#E7E4DE',
+  erro: '#B42318',
+};
+
+export default function Login({
+  navigation,
+  aoEntrar,
+  avisoSessao,
+}) {
+  const { width } = useWindowDimensions();
+  const telaGrande = width >= 850;
+
+  const [email, setEmail] = useState('');
+  const [senha, setSenha] = useState('');
+  const [mostrarSenha, setMostrarSenha] = useState(false);
+  const [erro, setErro] = useState('');
+  const [enviando, setEnviando] = useState(false);
+
+  async function realizarLogin() {
+    if (enviando) return;
+
+    setErro('');
+
+    if (!email.trim() || !senha) {
+      setErro('Preencha seu e-mail e sua senha.');
+      return;
+    }
+
+    setEnviando(true);
+
+    try {
+      const resposta = await fetch(API + '/auth/login', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          email: email.trim().toLowerCase(),
+          senha,
+        }),
+      });
+
+      const dados = await lerResposta(resposta);
+
+      if (!dados.token || !dados.usuario) {
+        throw new Error('Resposta de login inválida.');
+      }
+
+      await AsyncStorage.setItem('token', dados.token);
+
+      setSenha('');
+      aoEntrar(dados.usuario);
+    } catch (falha) {
+      setErro(
+        falha.status
+          ? falha.message
+          : falha.message === 'Resposta de login inválida.'
+            ? falha.message
+            : 'Não foi possível entrar. Confira se a API está funcionando.'
+      );
+    } finally {
+      setEnviando(false);
+    }
+  }
+
+  function abrirCadastro() {
+    navigation.navigate('CadastroUsuario');
+  }
+
+  return (
+    <KeyboardAvoidingView
+      style={css.tela}
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+    >
+      <ScrollView
+        contentContainerStyle={css.scroll}
+        keyboardShouldPersistTaps="handled"
+      >
+        <View style={css.container}>
+
+          {/* LOGO */}
+          <View style={css.cabecalho}>
+            <View style={css.logoIcone}>
+              <Ionicons name="paw" size={25} color="#FFFFFF" />
+            </View>
+
+            <View>
+              <Text style={css.logoNome}>
+                Pet<Text style={css.logoDestaque}>Match</Text>
+              </Text>
+
+              <Text style={css.logoSubtitulo}>
+                Conectando pets a novos lares
+              </Text>
+            </View>
+          </View>
+
+          {/* CONTEÚDO PRINCIPAL */}
+          <View
+            style={[
+              css.conteudo,
+              telaGrande && css.conteudoDesktop,
+            ]}
+          >
+
+            {/* APRESENTAÇÃO */}
+            <View style={css.apresentacao}>
+              <View style={css.etiqueta}>
+                <View style={css.pontoVerde} />
+
+                <Text style={css.etiquetaTexto}>
+                  ADOÇÃO RESPONSÁVEL
+                </Text>
+              </View>
+
+              <Text
+                style={[
+                  css.tituloPrincipal,
+                  !telaGrande && css.tituloMobile,
+                ]}
+              >
+                Um novo amigo{'\n'}
+                está esperando{'\n'}
+                <Text style={css.tituloDestaque}>
+                  por você.
+                </Text>
+              </Text>
+
+              <Text style={css.descricao}>
+                Cada animal merece uma nova oportunidade.
+                O PetMatch aproxima pessoas que desejam
+                adotar de cães e gatos que estão esperando
+                por um lar.
+              </Text>
+
+              <View style={css.informacao}>
+                <View style={css.barraVerde} />
+
+                <Text style={css.informacaoTexto}>
+                  Encontre seu novo melhor amigo e
+                  transforme duas vidas para sempre.
+                </Text>
+              </View>
+            </View>
+
+            {/* FORMULÁRIO */}
+            <View style={css.cartao}>
+
+              <Text style={css.tituloFormulario}>
+                Bem-vindo ao PetMatch!
+              </Text>
+
+              <Text style={css.subtituloFormulario}>
+                Entre na sua conta para continuar.
+              </Text>
+
+              {/* AVISO DE SESSÃO */}
+              {!!avisoSessao && (
+                <View style={css.aviso}>
+                  <Text style={css.avisoTexto}>
+                    {avisoSessao}
+                  </Text>
+                </View>
+              )}
+
+              {/* ERRO */}
+              {!!erro && (
+                <View style={css.avisoErro}>
+                  <Text style={css.erroTexto}>
+                    {erro}
+                  </Text>
+                </View>
+              )}
+
+              {/* E-MAIL */}
+              <View style={css.campoGrupo}>
+                <Text style={css.rotulo}>
+                  E-mail
+                </Text>
+
+                <TextInput
+                  style={css.campo}
+                  placeholder="seuemail@exemplo.com"
+                  placeholderTextColor="#A1A5AD"
+                  value={email}
+                  onChangeText={setEmail}
+                  keyboardType="email-address"
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  autoComplete="email"
+                  editable={!enviando}
+                  maxLength={150}
+                />
+              </View>
+
+              {/* SENHA */}
+              <View style={css.campoGrupo}>
+                <Text style={css.rotulo}>
+                  Senha
+                </Text>
+
+                <View style={css.campoSenha}>
+                  <TextInput
+                    style={css.inputSenha}
+                    placeholder="Digite sua senha"
+                    placeholderTextColor="#A1A5AD"
+                    value={senha}
+                    onChangeText={setSenha}
+                    secureTextEntry={!mostrarSenha}
+                    autoCapitalize="none"
+                    autoComplete="current-password"
+                    editable={!enviando}
+                    onSubmitEditing={realizarLogin}
+                  />
+
+                  <Pressable
+                    style={css.botaoMostrar}
+                    onPress={() => setMostrarSenha(!mostrarSenha)}
+                    accessibilityRole="button"
+                    accessibilityLabel={
+                      mostrarSenha
+                        ? 'Ocultar senha'
+                        : 'Mostrar senha'
+                    }
+                  >
+                    <Text style={css.mostrarTexto}>
+                      {mostrarSenha ? 'Ocultar' : 'Mostrar'}
+                    </Text>
+                  </Pressable>
+                </View>
+              </View>
+
+              {/* ENTRAR */}
+              <Pressable
+                style={[
+                  css.botaoEntrar,
+                  enviando && css.botaoDesativado,
+                ]}
+                onPress={realizarLogin}
+                disabled={enviando}
+                accessibilityRole="button"
+              >
+                {enviando ? (
+                  <ActivityIndicator color="#FFFFFF" />
+                ) : (
+                  <Text style={css.botaoEntrarTexto}>
+                    Entrar
+                  </Text>
+                )}
+              </Pressable>
+
+              {/* DIVISOR */}
+              <View style={css.divisor}>
+                <View style={css.linha} />
+
+                <Text style={css.divisorTexto}>
+                  OU
+                </Text>
+
+                <View style={css.linha} />
+              </View>
+
+              {/* CADASTRO */}
+              <Text style={css.textoCadastro}>
+                Ainda não tem uma conta?
+              </Text>
+
+              <Pressable
+                style={css.botaoCadastro}
+                onPress={abrirCadastro}
+                disabled={enviando}
+                accessibilityRole="button"
+              >
+                <Text style={css.botaoCadastroTexto}>
+                  Criar minha conta
+                </Text>
+              </Pressable>
+
+            </View>
+          </View>
+
+          {/* RODAPÉ */}
+          <View style={css.rodape}>
+            <Text style={css.rodapeTexto}>
+              PetMatch • Adoção responsável
+            </Text>
+          </View>
+
+        </View>
+      </ScrollView>
+    </KeyboardAvoidingView>
+  );
+}
+
+const css = StyleSheet.create({
+  tela: {
+    flex: 1,
+    backgroundColor: C.fundo,
+  },
+
+  scroll: {
+    flexGrow: 1,
+  },
+
+  container: {
+    width: '100%',
+    maxWidth: 1080,
+    alignSelf: 'center',
+    paddingHorizontal: 24,
+    flexGrow: 1,
+  },
+
+  cabecalho: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 22,
+    gap: 10,
+  },
+
+  logoIcone: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    backgroundColor: C.laranja,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  patinha: {
+    width: 25,
+    height: 25,
+  },
+
+  logoNome: {
+    color: C.texto,
+    fontSize: 23,
+    fontWeight: '900',
+    letterSpacing: -0.7,
+  },
+
+  logoDestaque: {
+    color: C.laranja,
+  },
+
+  logoSubtitulo: {
+    color: C.secundario,
+    fontSize: 10,
+    marginTop: 1,
+  },
+
+  conteudo: {
+    flex: 1,
+    justifyContent: 'center',
+    paddingVertical: 15,
+    gap: 25,
+  },
+
+  conteudoDesktop: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 40,
+  },
+
+  apresentacao: {
+    flex: 1,
+    maxWidth: 500,
+  },
+
+  etiqueta: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: '#EAF4DF',
+    paddingHorizontal: 13,
+    paddingVertical: 8,
+    borderRadius: 25,
+    alignSelf: 'flex-start',
+    marginBottom: 20,
+  },
+
+  pontoVerde: {
+    width: 7,
+    height: 7,
+    backgroundColor: C.verde,
+    borderRadius: 4,
+  },
+
+  etiquetaTexto: {
+    color: C.verde,
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 0.7,
+  },
+
+  tituloPrincipal: {
+    color: C.texto,
+    fontSize: 43,
+    lineHeight: 51,
+    fontWeight: '900',
+    letterSpacing: -1.5,
+  },
+
+  tituloMobile: {
+    fontSize: 32,
+    lineHeight: 39,
+  },
+
+  tituloDestaque: {
+    color: C.laranja,
+  },
+
+  descricao: {
+    color: C.secundario,
+    fontSize: 14,
+    lineHeight: 23,
+    marginTop: 17,
+    maxWidth: 420,
+  },
+
+  informacao: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 24,
+    gap: 12,
+    maxWidth: 390,
+  },
+
+  barraVerde: {
+    width: 4,
+    height: 42,
+    borderRadius: 3,
+    backgroundColor: C.verde,
+  },
+
+  informacaoTexto: {
+    color: C.texto,
+    fontSize: 13,
+    lineHeight: 20,
+    flex: 1,
+  },
+
+  cartao: {
+    width: '100%',
+    maxWidth: 405,
+    alignSelf: 'center',
+    backgroundColor: C.branco,
+    borderRadius: 22,
+    padding: 25,
+    borderWidth: 1,
+    borderColor: '#EEEAE3',
+    ...Platform.select({
+      web: {
+        boxShadow: '0px 8px 25px rgba(60, 50, 35, 0.06)',
+      },
+      default: {
+        elevation: 3,
+      },
+    }),
+  },
+
+  tituloFormulario: {
+    color: C.texto,
+    fontSize: 21,
+    fontWeight: '800',
+    textAlign: 'center',
+    letterSpacing: -0.4,
+  },
+
+  subtituloFormulario: {
+    color: C.secundario,
+    textAlign: 'center',
+    fontSize: 13,
+    marginTop: 8,
+    marginBottom: 26,
+  },
+
+  aviso: {
+    backgroundColor: '#EFF7E9',
+    padding: 12,
+    borderRadius: 10,
+    marginBottom: 15,
+  },
+
+  avisoTexto: {
+    color: C.verde,
+    fontSize: 12,
+  },
+
+  avisoErro: {
+    backgroundColor: '#FFF0EF',
+    padding: 12,
+    borderRadius: 10,
+    marginBottom: 15,
+  },
+
+  erroTexto: {
+    color: C.erro,
+    fontSize: 12,
+  },
+
+  campoGrupo: {
+    marginBottom: 17,
+  },
+
+  rotulo: {
+    color: C.texto,
+    fontSize: 13,
+    fontWeight: '700',
+    marginBottom: 8,
+  },
+
+  campo: {
+    height: 46,
+    borderWidth: 1,
+    borderColor: C.borda,
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    backgroundColor: '#FEFDFC',
+    color: C.texto,
+    fontSize: 13,
+  },
+
+  campoSenha: {
+    height: 46,
+    borderWidth: 1,
+    borderColor: C.borda,
+    borderRadius: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FEFDFC',
+  },
+
+  inputSenha: {
+    flex: 1,
+    minWidth: 0,
+    height: '100%',
+    paddingHorizontal: 14,
+    fontSize: 13,
+    color: C.texto,
+  },
+
+  botaoMostrar: {
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+
+  mostrarTexto: {
+    color: C.laranja,
+    fontSize: 11,
+    fontWeight: '700',
+  },
+
+  botaoEntrar: {
+    height: 46,
+    borderRadius: 12,
+    backgroundColor: C.laranja,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 5,
+  },
+
+  botaoDesativado: {
+    opacity: 0.65,
+  },
+
+  botaoEntrarTexto: {
+    color: C.branco,
+    fontSize: 14,
+    fontWeight: '800',
+  },
+
+  divisor: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    marginVertical: 19,
+  },
+
+  linha: {
+    flex: 1,
+    height: 1,
+    backgroundColor: C.borda,
+  },
+
+  divisorTexto: {
+    color: C.secundario,
+    fontSize: 10,
+    fontWeight: '700',
+  },
+
+  textoCadastro: {
+    textAlign: 'center',
+    color: C.secundario,
+    fontSize: 12,
+    marginBottom: 12,
+  },
+
+  botaoCadastro: {
+    height: 46,
+    borderWidth: 1,
+    borderColor: C.laranja,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  botaoCadastroTexto: {
+    color: C.laranja,
+    fontSize: 13,
+    fontWeight: '800',
+  },
+
+  rodape: {
+    alignItems: 'center',
+    paddingVertical: 20,
+  },
+
+  rodapeTexto: {
+    color: C.secundario,
+    fontSize: 11,
+    textAlign: 'center',
+  },
+});
+```
+
+
+### petmatch/screens/MinhasSolicitacoes.js
+
+```js
+
+import React, { useCallback, useState } from 'react';
+import {
+  View,
+  Text,
+  ScrollView,
+  StyleSheet,
+  ActivityIndicator,
+  Alert,
+  Platform,
+  Image,
+  RefreshControl,
+} from 'react-native';
+
+import { useFocusEffect } from '@react-navigation/native';
+
+import {
+  fetchAutenticado,
+  lerResposta,
+} from '../services/api';
+
+import { Botao, cores } from '../components/ui';
+
+export default function MinhasSolicitacoes({ navigation }) {
+  const [solicitacoes, setSolicitacoes] = useState([]);
+  const [usuario, setUsuario] = useState(null);
+  const [carregando, setCarregando] = useState(true);
+  const [atualizando, setAtualizando] = useState(false);
+  const [processandoId, setProcessandoId] = useState(null);
+  const [erro, setErro] = useState('');
+
+  const ehResponsavel = ['ong', 'protetor', 'admin'].includes(
+    usuario?.nivel
+  );
+
+  function avisar(titulo, mensagem) {
+    if (Platform.OS === 'web') {
+      window.alert(`${titulo}\n\n${mensagem}`);
+    } else {
+      Alert.alert(titulo, mensagem);
+    }
+  }
+
+  function confirmar(titulo, mensagem, acao) {
+    if (Platform.OS === 'web') {
+      if (window.confirm(`${titulo}\n\n${mensagem}`)) {
+        acao();
+      }
+      return;
+    }
+
+    Alert.alert(titulo, mensagem, [
+      { text: 'Voltar', style: 'cancel' },
+      {
+        text: 'Confirmar',
+        onPress: acao,
+      },
+    ]);
+  }
+
+  const carregarSolicitacoes = useCallback(
+    async (mostrarCarregamento = true) => {
+      if (mostrarCarregamento) {
+        setCarregando(true);
+      } else {
+        setAtualizando(true);
+      }
+
+      setErro('');
+
+      try {
+        // IDENTIFICAR O USUÁRIO LOGADO
+        const respostaUsuario = await fetchAutenticado(
+          '/auth/me'
+        );
+
+        const dadosUsuario = await lerResposta(
+          respostaUsuario
+        );
+
+        setUsuario(dadosUsuario);
+
+        // BUSCAR AS SOLICITAÇÕES PERMITIDAS PARA A CONTA
+        const resposta = await fetchAutenticado(
+          '/adocoes'
+        );
+
+        const dados = await lerResposta(resposta);
+
+        setSolicitacoes(
+          Array.isArray(dados) ? dados : []
+        );
+      } catch (erroRequisicao) {
+        setErro(
+          erroRequisicao.message ||
+            'Não foi possível carregar as solicitações.'
+        );
+      } finally {
+        setCarregando(false);
+        setAtualizando(false);
+      }
+    },
+    []
+  );
+
+  // ATUALIZAR QUANDO A TELA FOR ABERTA NOVAMENTE
+  useFocusEffect(
+    useCallback(() => {
+      carregarSolicitacoes();
+    }, [carregarSolicitacoes])
+  );
+
+  function nomeStatus(status) {
+    switch (status) {
+      case 'pendente':
+        return 'Pendente';
+      case 'aprovada':
+        return 'Aprovada';
+      case 'recusada':
+        return 'Recusada';
+      case 'cancelada':
+        return 'Cancelada';
+      default:
+        return status || 'Não informado';
+    }
+  }
+
+  function corStatus(status) {
+    switch (status) {
+      case 'pendente':
+        return '#B7791F';
+      case 'aprovada':
+        return '#25805A';
+      case 'recusada':
+        return '#B54747';
+      case 'cancelada':
+        return '#607D8B';
+      default:
+        return '#607D8B';
+    }
+  }
+
+  function formatarData(data) {
+    if (!data) return '';
+
+    const valor = new Date(data);
+
+    if (Number.isNaN(valor.getTime())) {
+      return '';
+    }
+
+    return valor.toLocaleDateString('pt-BR');
+  }
+
+  // ADOTANTE CANCELA UMA SOLICITAÇÃO PENDENTE
+  async function cancelarSolicitacao(id) {
+    try {
+      setProcessandoId(id);
+
+      const resposta = await fetchAutenticado(
+        `/adocoes/${id}/cancelar`,
+        {
+          method: 'PUT',
+        }
+      );
+
+      const dados = await lerResposta(resposta);
+
+      avisar(
+        'Solicitação cancelada',
+        dados.mensagem || 'Seu pedido foi cancelado.'
+      );
+
+      await carregarSolicitacoes(false);
+    } catch (erroRequisicao) {
+      avisar(
+        'Erro',
+        erroRequisicao.message ||
+          'Não foi possível cancelar a solicitação.'
+      );
+    } finally {
+      setProcessandoId(null);
+    }
+  }
+
+  // ONG, PROTETOR OU ADMIN AVALIA UMA SOLICITAÇÃO
+  async function atualizarStatus(id, novoStatus) {
+    try {
+      setProcessandoId(id);
+
+      const resposta = await fetchAutenticado(
+        `/adocoes/${id}/status`,
+        {
+          method: 'PUT',
+          body: JSON.stringify({
+            status: novoStatus,
+          }),
+        }
+      );
+
+      const dados = await lerResposta(resposta);
+
+      avisar(
+        'Solicitação atualizada',
+        dados.mensagem || 'Status atualizado.'
+      );
+
+      await carregarSolicitacoes(false);
+    } catch (erroRequisicao) {
+      avisar(
+        'Erro',
+        erroRequisicao.message ||
+          'Não foi possível atualizar a solicitação.'
+      );
+    } finally {
+      setProcessandoId(null);
+    }
+  }
+
+  if (carregando) {
+    return (
+      <View style={estilos.centralizado}>
+        <ActivityIndicator
+          size="large"
+          color={cores.primaria}
+        />
+        <Text style={estilos.textoAuxiliar}>
+          Carregando solicitações...
+        </Text>
+      </View>
+    );
+  }
+
+  return (
+    <ScrollView
+      style={estilos.container}
+      contentContainerStyle={estilos.conteudo}
+      refreshControl={
+        <RefreshControl
+          refreshing={atualizando}
+          onRefresh={() => carregarSolicitacoes(false)}
+        />
+      }
+    >
+      <Text style={estilos.titulo}>
+        {ehResponsavel
+          ? 'Solicitações recebidas'
+          : 'Minhas solicitações'}
+      </Text>
+
+      <Text style={estilos.subtitulo}>
+        {ehResponsavel
+          ? 'Acompanhe e avalie os pedidos de adoção dos animais sob sua responsabilidade.'
+          : 'Acompanhe aqui o andamento dos seus pedidos de adoção.'}
+      </Text>
+
+      {erro ? (
+        <View style={estilos.cartao}>
+          <Text style={estilos.textoErro}>
+            {erro}
+          </Text>
+
+          <Botao
+            titulo="Tentar novamente"
+            onPress={() => carregarSolicitacoes()}
+          />
+        </View>
+      ) : solicitacoes.length === 0 ? (
+        <View style={estilos.cartaoVazio}>
+          <Text style={estilos.tituloVazio}>
+            Nenhuma solicitação encontrada
+          </Text>
+
+          <Text style={estilos.textoAuxiliar}>
+            {ehResponsavel
+              ? 'Quando alguém solicitar a adoção de um dos seus animais, o pedido aparecerá aqui.'
+              : 'Você ainda não fez nenhuma solicitação de adoção.'}
+          </Text>
+
+          {!ehResponsavel && (
+            <View style={estilos.espacoBotao}>
+              <Botao
+                titulo="Conhecer animais"
+                onPress={() => navigation.navigate('Animais')}
+              />
+            </View>
+          )}
+        </View>
+      ) : (
+        solicitacoes.map((solicitacao) => {
+          const processando =
+            processandoId !== null;
+
+          const pendente =
+            solicitacao.status === 'pendente';
+
+          return (
+            <View
+              key={solicitacao.id}
+              style={estilos.cartao}
+            >
+              {solicitacao.foto_animal ? (
+                <Image
+                  source={{
+                    uri: solicitacao.foto_animal,
+                  }}
+                  style={estilos.foto}
+                  resizeMode="cover"
+                />
+              ) : null}
+
+              <View style={estilos.linhaCabecalho}>
+                <Text style={estilos.nomeAnimal}>
+                  {solicitacao.nome_animal ||
+                    'Animal'}
+                </Text>
+
+                <View
+                  style={[
+                    estilos.etiqueta,
+                    {
+                      backgroundColor:
+                        corStatus(solicitacao.status) +
+                        '18',
+                    },
+                  ]}
+                >
+                  <Text
+                    style={[
+                      estilos.textoEtiqueta,
+                      {
+                        color: corStatus(
+                          solicitacao.status
+                        ),
+                      },
+                    ]}
+                  >
+                    {nomeStatus(
+                      solicitacao.status
+                    )}
+                  </Text>
+                </View>
+              </View>
+
+              {ehResponsavel && (
+                <Text style={estilos.informacao}>
+                  <Text style={estilos.negrito}>
+                    Interessado:{' '}
+                  </Text>
+                  {solicitacao.nome_adotante}
+                </Text>
+              )}
+
+              {solicitacao.criado_em && (
+                <Text style={estilos.informacao}>
+                  <Text style={estilos.negrito}>
+                    Data:{' '}
+                  </Text>
+                  {formatarData(
+                    solicitacao.criado_em
+                  )}
+                </Text>
+              )}
+
+              {solicitacao.mensagem ? (
+                <View style={estilos.areaMensagem}>
+                  <Text style={estilos.rotuloMensagem}>
+                    Mensagem do adotante
+                  </Text>
+
+                  <Text style={estilos.mensagem}>
+                    {solicitacao.mensagem}
+                  </Text>
+                </View>
+              ) : null}
+
+              <View style={estilos.espacoBotao}>
+                <Botao
+                  titulo="Ver animal"
+                  variante="secundario"
+                  onPress={() =>
+                    navigation.navigate(
+                      'DetalhesAnimal',
+                      {
+                        id: solicitacao.animal_id,
+                      }
+                    )
+                  }
+                />
+              </View>
+
+              {pendente && !ehResponsavel && (
+                <View style={estilos.espacoBotao}>
+                  <Botao
+                    titulo="Cancelar solicitação"
+                    variante="secundario"
+                    disabled={processando}
+                    onPress={() =>
+                      confirmar(
+                        'Cancelar solicitação',
+                        'Deseja cancelar este pedido de adoção?',
+                        () =>
+                          cancelarSolicitacao(
+                            solicitacao.id
+                          )
+                      )
+                    }
+                  />
+                </View>
+              )}
+
+              {pendente && ehResponsavel && (
+                <>
+                  <View style={estilos.espacoBotao}>
+                    <Botao
+                      titulo="Aprovar adoção"
+                      disabled={processando}
+                      onPress={() =>
+                        confirmar(
+                          'Aprovar adoção',
+                          'Deseja aprovar esta solicitação? O animal será marcado como adotado e os outros pedidos pendentes serão recusados.',
+                          () =>
+                            atualizarStatus(
+                              solicitacao.id,
+                              'aprovada'
+                            )
+                        )
+                      }
+                    />
+                  </View>
+
+                  <View style={estilos.espacoBotao}>
+                    <Botao
+                      titulo="Recusar solicitação"
+                      variante="secundario"
+                      disabled={processando}
+                      onPress={() =>
+                        confirmar(
+                          'Recusar solicitação',
+                          'Deseja recusar este pedido de adoção?',
+                          () =>
+                            atualizarStatus(
+                              solicitacao.id,
+                              'recusada'
+                            )
+                        )
+                      }
+                    />
+                  </View>
+                </>
+              )}
+            </View>
+          );
+        })
+      )}
+    </ScrollView>
+  );
+}
+
+const estilos = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: '#F8F9FA',
+  },
+
+  conteudo: {
+    padding: 20,
+    paddingBottom: 40,
+  },
+
+  centralizado: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 24,
+    gap: 14,
+  },
+
+  titulo: {
+    fontSize: 26,
+    fontWeight: 'bold',
+    color: '#263238',
+    marginBottom: 10,
+  },
+
+  subtitulo: {
+    fontSize: 15,
+    color: '#607D8B',
+    lineHeight: 22,
+    marginBottom: 24,
+  },
+
+  cartao: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 14,
+    padding: 18,
+    marginBottom: 18,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+  },
+
+  cartaoVazio: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 14,
+    padding: 25,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+  },
+
+  tituloVazio: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#263238',
+    marginBottom: 12,
+    textAlign: 'center',
+  },
+
+  textoAuxiliar: {
+    fontSize: 14,
+    color: '#607D8B',
+    textAlign: 'center',
+    lineHeight: 21,
+  },
+
+  textoErro: {
+    color: '#B54747',
+    marginBottom: 15,
+  },
+
+  foto: {
+    width: '100%',
+    height: 180,
+    borderRadius: 10,
+    marginBottom: 16,
+  },
+
+  linhaCabecalho: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    gap: 10,
+    marginBottom: 12,
+  },
+
+  nomeAnimal: {
+    flex: 1,
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#263238',
+  },
+
+  etiqueta: {
+    borderRadius: 20,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+  },
+
+  textoEtiqueta: {
+    fontSize: 12,
+    fontWeight: 'bold',
+  },
+
+  informacao: {
+    fontSize: 14,
+    color: '#607D8B',
+    marginBottom: 8,
+  },
+
+  negrito: {
+    fontWeight: 'bold',
+    color: '#455A64',
+  },
+
+  areaMensagem: {
+    backgroundColor: '#F5F7F8',
+    padding: 14,
+    borderRadius: 10,
+    marginTop: 12,
+  },
+
+  rotuloMensagem: {
+    fontSize: 13,
+    fontWeight: 'bold',
+    color: '#455A64',
+    marginBottom: 8,
+  },
+
+  mensagem: {
+    fontSize: 14,
+    color: '#607D8B',
+    lineHeight: 21,
+  },
+
+  espacoBotao: {
+    marginTop: 12,
+  },
+});
+```
+
+
+### petmatch/screens/Perfil.js
+
+```js
+
+import React, { useEffect, useState } from 'react';
+import {
+  View,
+  Text,
+  ScrollView,
+  StyleSheet,
+  ActivityIndicator,
+  Alert,
+  Platform,
+} from 'react-native';
+
+import AsyncStorage from '@react-native-async-storage/async-storage';
+
+import {
+  fetchAutenticado,
+  lerResposta,
+} from '../services/api';
+
+import { Botao, cores } from '../components/ui';
+
+export default function Perfil({ navigation }) {
+  const [usuario, setUsuario] = useState(null);
+  const [carregando, setCarregando] = useState(true);
+  const [saindo, setSaindo] = useState(false);
+
+  useEffect(() => {
+    carregarPerfil();
+  }, []);
+
+  async function carregarPerfil() {
+    try {
+      setCarregando(true);
+
+      const resposta = await fetchAutenticado('/auth/me');
+      const dados = await lerResposta(resposta);
+
+      setUsuario(dados);
+    } catch (erro) {
+      const mensagem =
+        erro.message ||
+        'Não foi possível carregar seu perfil.';
+
+      if (Platform.OS === 'web') {
+        window.alert(mensagem);
+      } else {
+        Alert.alert('Erro', mensagem);
+      }
+    } finally {
+      setCarregando(false);
+    }
+  }
+
+  function nomeNivel(nivel) {
+    switch (nivel) {
+      case 'adotante':
+        return 'Adotante';
+
+      case 'ong':
+        return 'ONG';
+
+      case 'protetor':
+        return 'Protetor independente';
+
+      case 'admin':
+        return 'Administrador';
+
+      default:
+        return 'Usuário';
+    }
+  }
+
+  async function sairDaConta() {
+    try {
+      setSaindo(true);
+
+      await AsyncStorage.removeItem('token');
+
+      navigation.reset({
+        index: 0,
+        routes: [{ name: 'Login' }],
+      });
+    } catch (erro) {
+      if (Platform.OS === 'web') {
+        window.alert('Não foi possível sair da conta.');
+      } else {
+        Alert.alert(
+          'Erro',
+          'Não foi possível sair da conta.'
+        );
+      }
+    } finally {
+      setSaindo(false);
+    }
+  }
+
+  function confirmarSaida() {
+    if (Platform.OS === 'web') {
+      if (
+        window.confirm(
+          'Deseja realmente sair da sua conta?'
+        )
+      ) {
+        sairDaConta();
+      }
+      return;
+    }
+
+    Alert.alert(
+      'Sair da conta',
+      'Deseja realmente sair da sua conta?',
+      [
+        {
+          text: 'Cancelar',
+          style: 'cancel',
+        },
+        {
+          text: 'Sair',
+          style: 'destructive',
+          onPress: sairDaConta,
+        },
+      ]
+    );
+  }
+
+  if (carregando) {
+    return (
+      <View style={estilos.centralizado}>
+        <ActivityIndicator
+          size="large"
+          color={cores.primaria}
+        />
+
+        <Text style={estilos.textoAuxiliar}>
+          Carregando seu perfil...
+        </Text>
+      </View>
+    );
+  }
+
+  if (!usuario) {
+    return (
+      <View style={estilos.centralizado}>
+        <Text style={estilos.titulo}>
+          Meu perfil
+        </Text>
+
+        <Text style={estilos.textoAuxiliar}>
+          Não foi possível carregar suas informações.
+        </Text>
+
+        <Botao
+          titulo="Tentar novamente"
+          onPress={carregarPerfil}
+        />
+      </View>
+    );
+  }
+
+  const inicial =
+    usuario.nome?.charAt(0)?.toUpperCase() || 'U';
+
+  return (
+    <ScrollView
+      style={estilos.container}
+      contentContainerStyle={estilos.conteudo}
+    >
+      <Text style={estilos.titulo}>
+        Meu perfil
+      </Text>
+
+      <View style={estilos.cartaoPerfil}>
+        <View style={estilos.avatar}>
+          <Text style={estilos.letraAvatar}>
+            {inicial}
+          </Text>
+        </View>
+
+        <Text style={estilos.nome}>
+          {usuario.nome}
+        </Text>
+
+        <Text style={estilos.email}>
+          {usuario.email}
+        </Text>
+
+        <View style={estilos.etiqueta}>
+          <Text style={estilos.textoEtiqueta}>
+            {nomeNivel(usuario.nivel)}
+          </Text>
+        </View>
+      </View>
+
+      <Text style={estilos.tituloSecao}>
+        Minhas informações
+      </Text>
+
+      <View style={estilos.cartao}>
+        <Text style={estilos.rotulo}>
+          Nome completo
+        </Text>
+
+        <Text style={estilos.valor}>
+          {usuario.nome}
+        </Text>
+
+        <View style={estilos.divisor} />
+
+        <Text style={estilos.rotulo}>
+          E-mail
+        </Text>
+
+        <Text style={estilos.valor}>
+          {usuario.email}
+        </Text>
+
+        <View style={estilos.divisor} />
+
+        <Text style={estilos.rotulo}>
+          Tipo de conta
+        </Text>
+
+        <Text style={estilos.valor}>
+          {nomeNivel(usuario.nivel)}
+        </Text>
+      </View>
+
+      <Text style={estilos.tituloSecao}>
+        Minha conta
+      </Text>
+
+      <View style={estilos.cartao}>
+        <Botao
+          titulo="Meus favoritos"
+          onPress={() =>
+            navigation.navigate('Favoritos')
+          }
+        />
+
+        <View style={estilos.espacoBotao}>
+          <Botao
+            titulo="Minhas solicitações"
+            variante="secundario"
+            onPress={() =>
+              navigation.navigate('MinhasSolicitacoes')
+            }
+          />
+        </View>
+
+        {['ong', 'protetor', 'admin'].includes(
+          usuario.nivel
+        ) && (
+          <View style={estilos.espacoBotao}>
+            <Botao
+              titulo="Cadastrar animal"
+              variante="secundario"
+              onPress={() =>
+                navigation.navigate('CadastrarAnimal')
+              }
+            />
+          </View>
+        )}
+
+        {usuario.nivel === 'admin' && (
+          <View style={estilos.espacoBotao}>
+            <Botao
+              titulo="Gerenciar usuários"
+              variante="secundario"
+              onPress={() =>
+                navigation.navigate('Usuarios')
+              }
+            />
+          </View>
+        )}
+      </View>
+
+      <View style={estilos.areaSair}>
+        <Botao
+          titulo="Sair da conta"
+          variante="secundario"
+          onPress={confirmarSaida}
+          disabled={saindo}
+          carregando={saindo}
+        />
+      </View>
+
+      <Text style={estilos.rodape}>
+        PetMatch — Conectando animais a novos lares.
+      </Text>
+    </ScrollView>
+  );
+}
+
+const estilos = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: '#F8F9FA',
+  },
+
+  conteudo: {
+    padding: 20,
+    paddingBottom: 40,
+  },
+
+  centralizado: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 24,
+    gap: 16,
+    backgroundColor: '#F8F9FA',
+  },
+
+  titulo: {
+    fontSize: 26,
+    fontWeight: 'bold',
+    color: '#263238',
+    marginBottom: 24,
+  },
+
+  cartaoPerfil: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    padding: 24,
+    alignItems: 'center',
+    marginBottom: 28,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+  },
+
+  avatar: {
+    width: 90,
+    height: 90,
+    borderRadius: 45,
+    backgroundColor: '#DCEFE7',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 14,
+  },
+
+  letraAvatar: {
+    fontSize: 38,
+    fontWeight: 'bold',
+    color: '#42685C',
+  },
+
+  nome: {
+    fontSize: 22,
+    fontWeight: 'bold',
+    color: '#263238',
+    textAlign: 'center',
+    marginBottom: 6,
+  },
+
+  email: {
+    fontSize: 14,
+    color: '#607D8B',
+    textAlign: 'center',
+    marginBottom: 14,
+  },
+
+  etiqueta: {
+    backgroundColor: '#EAF4F0',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 20,
+  },
+
+  textoEtiqueta: {
+    color: '#42685C',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+
+  tituloSecao: {
+    fontSize: 19,
+    fontWeight: 'bold',
+    color: '#263238',
+    marginBottom: 14,
+  },
+
+  cartao: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 14,
+    padding: 20,
+    marginBottom: 26,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+  },
+
+  rotulo: {
+    fontSize: 13,
+    color: '#78909C',
+    marginBottom: 5,
+  },
+
+  valor: {
+    fontSize: 16,
+    color: '#263238',
+    fontWeight: '500',
+  },
+
+  divisor: {
+    height: 1,
+    backgroundColor: '#ECEFF1',
+    marginVertical: 16,
+  },
+
+  espacoBotao: {
+    marginTop: 12,
+  },
+
+  areaSair: {
+    marginBottom: 25,
+  },
+
+  textoAuxiliar: {
+    fontSize: 14,
+    color: '#607D8B',
+    textAlign: 'center',
+  },
+
+  rodape: {
+    fontSize: 12,
+    color: '#90A4AE',
+    textAlign: 'center',
+    marginTop: 10,
+  },
+});
+```
+
+
+### petmatch/screens/SolicitarAdocao.js
+
+```js
+
+import React, { useEffect, useState } from 'react';
+import {
+  View,
+  Text,
+  TextInput,
+  Alert,
+  ScrollView,
+  StyleSheet,
+  ActivityIndicator,
+  Platform,
+} from 'react-native';
+
+import {
+  fetchAutenticado,
+  lerResposta,
+} from '../services/api';
+
+import { Botao, cores } from '../components/ui';
+
+export default function SolicitarAdocao({ route, navigation }) {
+  const animalId = route.params?.animalId ?? route.params?.id;
+
+  const [animal, setAnimal] = useState(null);
+  const [mensagem, setMensagem] = useState('');
+  const [carregando, setCarregando] = useState(true);
+  const [enviando, setEnviando] = useState(false);
+
+  function avisar(titulo, texto, aoConfirmar) {
+    if (Platform.OS === 'web') {
+      window.alert(`${titulo}\n\n${texto}`);
+      if (aoConfirmar) aoConfirmar();
+    } else {
+      Alert.alert(titulo, texto, [
+        { text: 'OK', onPress: aoConfirmar },
+      ]);
+    }
+  }
+
+  useEffect(() => {
+    async function carregarAnimal() {
+      if (!animalId) {
+        setCarregando(false);
+        return;
+      }
+
+      try {
+        const resposta = await fetchAutenticado(
+          `/animais/${animalId}`
+        );
+
+        const dados = await lerResposta(resposta);
+        setAnimal(dados);
+      } catch (erro) {
+        avisar(
+          'Erro',
+          erro.message ||
+            'Não foi possível carregar as informações do animal.'
+        );
+      } finally {
+        setCarregando(false);
+      }
+    }
+
+    carregarAnimal();
+  }, [animalId]);
+
+  async function enviarSolicitacao() {
+    if (!animalId || !animal) {
+      avisar('Atenção', 'Animal não encontrado.');
+      return;
+    }
+
+    if (animal.status !== 'disponivel') {
+      avisar(
+        'Atenção',
+        'Este animal não está disponível para adoção.'
+      );
+      return;
+    }
+
+    if (!mensagem.trim()) {
+      avisar(
+        'Atenção',
+        'Escreva uma mensagem contando por que deseja adotar.'
+      );
+      return;
+    }
+
+    if (mensagem.trim().length > 1000) {
+      avisar(
+        'Atenção',
+        'A mensagem deve ter até 1000 caracteres.'
+      );
+      return;
+    }
+
+    try {
+      setEnviando(true);
+
+      const resposta = await fetchAutenticado('/adocoes', {
+        method: 'POST',
+        body: JSON.stringify({
+          animal_id: Number(animalId),
+          mensagem: mensagem.trim(),
+        }),
+      });
+
+      await lerResposta(resposta);
+
+      avisar(
+        'Solicitação enviada!',
+        'Seu pedido de adoção foi enviado com sucesso. Acompanhe a resposta em Minhas Solicitações.',
+        () => navigation.navigate('MinhasSolicitacoes')
+      );
+    } catch (erro) {
+      avisar(
+        'Erro',
+        erro.message ||
+          'Não foi possível enviar a solicitação.'
+      );
+    } finally {
+      setEnviando(false);
+    }
+  }
+
+  if (carregando) {
+    return (
+      <View style={estilos.centralizado}>
+        <ActivityIndicator
+          size="large"
+          color={cores.primaria}
+        />
+        <Text style={estilos.textoAuxiliar}>
+          Carregando informações...
+        </Text>
+      </View>
+    );
+  }
+
+  if (!animal) {
+    return (
+      <View style={estilos.centralizado}>
+        <Text style={estilos.titulo}>
+          Animal não encontrado
+        </Text>
+
+        <Botao
+          titulo="Voltar"
+          onPress={() => navigation.goBack()}
+        />
+      </View>
+    );
+  }
+
+  return (
+    <ScrollView
+      style={estilos.container}
+      contentContainerStyle={estilos.conteudo}
+      keyboardShouldPersistTaps="handled"
+    >
+      <Text style={estilos.titulo}>
+        Solicitar adoção
+      </Text>
+
+      <Text style={estilos.subtitulo}>
+        Que bom que você quer dar uma nova oportunidade
+        a um animal!
+      </Text>
+
+      <View style={estilos.cartao}>
+        <Text style={estilos.rotulo}>
+          Você deseja adotar:
+        </Text>
+
+        <Text style={estilos.nomeAnimal}>
+          {animal.nome}
+        </Text>
+
+        <Text style={estilos.detalhes}>
+          {animal.especie}
+          {animal.raca ? ` • ${animal.raca}` : ''}
+        </Text>
+
+        {animal.cidade ? (
+          <Text style={estilos.detalhes}>
+            Localização: {animal.cidade}
+          </Text>
+        ) : null}
+      </View>
+
+      <Text style={estilos.secaoTitulo}>
+        Conte um pouquinho sobre você
+      </Text>
+
+      <Text style={estilos.descricao}>
+        Escreva por que você gostaria de adotar{' '}
+        {animal.nome}. Sua mensagem será enviada para
+        o responsável pelo animal.
+      </Text>
+
+      <Text style={estilos.rotulo}>
+        Sua mensagem
+      </Text>
+
+      <TextInput
+        style={estilos.campoMensagem}
+        placeholder="Olá! Tenho interesse em adotar..."
+        placeholderTextColor="#999"
+        multiline
+        textAlignVertical="top"
+        value={mensagem}
+        onChangeText={setMensagem}
+        maxLength={1000}
+        editable={!enviando}
+      />
+
+      <Text style={estilos.contador}>
+        {mensagem.length}/1000 caracteres
+      </Text>
+
+      <View style={estilos.aviso}>
+        <Text style={estilos.textoAviso}>
+          Enviar a solicitação não significa que a
+          adoção foi aprovada. O responsável vai analisar
+          seu pedido antes de confirmar.
+        </Text>
+      </View>
+
+      <Botao
+        titulo="Enviar solicitação"
+        onPress={enviarSolicitacao}
+        disabled={
+          enviando ||
+          animal.status !== 'disponivel'
+        }
+        carregando={enviando}
+      />
+
+      <View style={estilos.espacoBotao}>
+        <Botao
+          titulo="Voltar"
+          variante="secundario"
+          onPress={() => navigation.goBack()}
+          disabled={enviando}
+        />
+      </View>
+    </ScrollView>
+  );
+}
+
+const estilos = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: '#F8F9FA',
+  },
+
+  conteudo: {
+    padding: 20,
+    paddingBottom: 40,
+  },
+
+  centralizado: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 24,
+    gap: 16,
+  },
+
+  titulo: {
+    fontSize: 26,
+    fontWeight: 'bold',
+    color: '#263238',
+    marginBottom: 10,
+  },
+
+  subtitulo: {
+    fontSize: 15,
+    color: '#607D8B',
+    lineHeight: 22,
+    marginBottom: 24,
+  },
+
+  cartao: {
+    backgroundColor: '#FFFFFF',
+    padding: 20,
+    borderRadius: 14,
+    marginBottom: 28,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+  },
+
+  rotulo: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#455A64',
+    marginBottom: 10,
+  },
+
+  nomeAnimal: {
+    fontSize: 23,
+    fontWeight: 'bold',
+    color: '#263238',
+    marginBottom: 8,
+  },
+
+  detalhes: {
+    fontSize: 14,
+    color: '#607D8B',
+    marginBottom: 5,
+  },
+
+  secaoTitulo: {
+    fontSize: 19,
+    fontWeight: 'bold',
+    color: '#263238',
+    marginBottom: 12,
+  },
+
+  descricao: {
+    fontSize: 15,
+    color: '#607D8B',
+    lineHeight: 22,
+    marginBottom: 20,
+  },
+
+  campoMensagem: {
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#DDE2E5',
+    borderRadius: 12,
+    padding: 15,
+    fontSize: 15,
+    color: '#263238',
+    minHeight: 150,
+  },
+
+  contador: {
+    fontSize: 12,
+    color: '#78909C',
+    textAlign: 'right',
+    marginTop: 8,
+    marginBottom: 22,
+  },
+
+  aviso: {
+    backgroundColor: '#EAF4F0',
+    padding: 16,
+    borderRadius: 12,
+    marginBottom: 25,
+  },
+
+  textoAviso: {
+    fontSize: 13,
+    color: '#42685C',
+    lineHeight: 20,
+  },
+
+  textoAuxiliar: {
+    color: '#607D8B',
+  },
+
+  espacoBotao: {
+    marginTop: 12,
+  },
+});
+```
+
+
+### petmatch/screens/Usuarios.js
+
+```js
+
+import React, { useCallback, useState } from 'react';
+import {
+  FlatList,
+  StyleSheet,
+  Text,
+  View,
+  Alert,
+} from 'react-native';
+
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
-import { Aviso, Botao, Carregamento, Pagina, Painel, cores, estilos } from '../components/ui';
-import { fetchAutenticado, lerResposta } from '../services/api';
+
+import {
+  Aviso,
+  Botao,
+  Carregamento,
+  Pagina,
+  Painel,
+  cores,
+  estilos,
+} from '../components/ui.js';
+
+import {
+  fetchAutenticado,
+  lerResposta,
+} from '../services/api.js';
+
+// NÍVEIS DE ACESSO DO PETMATCH
+const niveis = [
+  'adotante',
+  'ong',
+  'protetor',
+  'admin',
+];
+
+// EXIBIR NOMES MAIS AMIGÁVEIS
+function nomeNivel(nivel) {
+  const nomes = {
+    adotante: 'Adotante',
+    ong: 'ONG',
+    protetor: 'Protetor independente',
+    admin: 'Administrador',
+  };
+
+  return nomes[nivel] || nivel;
+}
 
 export default function Usuarios({ usuario }) {
   const [usuarios, setUsuarios] = useState([]);
@@ -2249,136 +9077,377 @@ export default function Usuarios({ usuario }) {
   const [erro, setErro] = useState('');
   const [sucesso, setSucesso] = useState('');
 
+  // BUSCAR USUÁRIOS CADASTRADOS
   async function carregarUsuarios(signal) {
     setCarregando(true);
     setErro('');
 
     try {
-      // Esta rota administrativa devolve somente dados básicos, nunca senha/hash.
-      const resposta = await fetchAutenticado('/usuarios', { signal });
+      // ROTA PROTEGIDA PARA ADMINISTRADORES
+      const resposta = await fetchAutenticado(
+        '/usuarios',
+        { signal }
+      );
+
       const dados = await lerResposta(resposta);
-      if (!signal?.aborted) setUsuarios(dados);
+
+      if (!signal?.aborted) {
+        setUsuarios(
+          Array.isArray(dados) ? dados : []
+        );
+      }
     } catch (falha) {
-      if (!signal?.aborted) setErro(falha.message);
+      if (!signal?.aborted) {
+        setErro(
+          falha.message ||
+          'Não foi possível carregar os usuários.'
+        );
+      }
     } finally {
-      if (!signal?.aborted) setCarregando(false);
+      if (!signal?.aborted) {
+        setCarregando(false);
+      }
     }
   }
 
-  useFocusEffect(useCallback(function () {
-    if (usuario?.nivel !== 'admin') return undefined;
-    const controle = new AbortController();
-    carregarUsuarios(controle.signal);
-    return function () { controle.abort(); };
-  }, [usuario?.nivel]));
+  // CARREGAR AO ABRIR A TELA
+  useFocusEffect(
+    useCallback(function () {
+      if (usuario?.nivel !== 'admin') {
+        return undefined;
+      }
 
-  async function alterarNivel(pessoa) {
+      const controle = new AbortController();
+
+      carregarUsuarios(controle.signal);
+
+      return function () {
+        controle.abort();
+      };
+    }, [usuario?.nivel])
+  );
+
+  // ATUALIZAR NÍVEL DO USUÁRIO
+  async function alterarNivel(pessoa, novoNivel) {
     if (alterandoId !== null) return;
+
     setErro('');
     setSucesso('');
 
+    // IMPEDIR ALTERAÇÃO DO PRÓPRIO NÍVEL
     if (Number(pessoa.id) === Number(usuario.id)) {
-      setErro('Não é possível alterar o próprio nível.');
+      setErro('Você não pode alterar seu próprio nível.');
       return;
     }
 
-    const novoNivel = pessoa.nivel === 'admin' ? 'usuario' : 'admin';
+    if (!niveis.includes(novoNivel)) {
+      setErro('Nível de acesso inválido.');
+      return;
+    }
+
+    if (pessoa.nivel === novoNivel) {
+      return;
+    }
+
     setAlterandoId(pessoa.id);
 
     try {
-      // O único dado enviado no body é o novo nível. A API verifica novamente
-      // quem está autenticado, sua permissão e a proibição de alterar a si mesmo.
-      const resposta = await fetchAutenticado('/usuarios/' + pessoa.id + '/nivel', {
-        method: 'PUT',
-        body: JSON.stringify({ nivel: novoNivel }),
-      });
+      // PUT ATUALIZA O NÍVEL NO BANCO DE DADOS
+      const resposta = await fetchAutenticado(
+        '/usuarios/' + pessoa.id + '/nivel',
+        {
+          method: 'PUT',
+          body: JSON.stringify({
+            nivel: novoNivel,
+          }),
+        }
+      );
+
       const dados = await lerResposta(resposta);
+
+      // ATUALIZAR LISTA LOCAL
       setUsuarios(function (atuais) {
         return atuais.map(function (item) {
-          return item.id === pessoa.id ? { ...item, nivel: novoNivel } : item;
+          return Number(item.id) === Number(pessoa.id)
+            ? { ...item, nivel: novoNivel }
+            : item;
         });
       });
-      setSucesso(dados.mensagem || 'Nível atualizado com sucesso.');
-      await carregarUsuarios();
+
+      setSucesso(
+        dados.mensagem ||
+        'Nível de acesso atualizado com sucesso.'
+      );
     } catch (falha) {
-      setErro(falha.message);
+      setErro(
+        falha.message ||
+        'Não foi possível alterar o nível.'
+      );
     } finally {
       setAlterandoId(null);
     }
   }
 
+  // CONFIRMAR ANTES DE ALTERAR
+  function confirmarAlteracao(pessoa, novoNivel) {
+    Alert.alert(
+      'Alterar nível de acesso',
+      'Deseja alterar o nível de ' +
+        pessoa.nome +
+        ' para ' +
+        nomeNivel(novoNivel) +
+        '?',
+      [
+        {
+          text: 'Cancelar',
+          style: 'cancel',
+        },
+        {
+          text: 'Confirmar',
+          onPress: function () {
+            alterarNivel(pessoa, novoNivel);
+          },
+        },
+      ]
+    );
+  }
+
+  // RENDERIZAR CADA USUÁRIO
   function renderizarUsuario({ item }) {
-    const proprioUsuario = Number(item.id) === Number(usuario.id);
+    const proprioUsuario =
+      Number(item.id) === Number(usuario.id);
+
+    const alterandoEste =
+      alterandoId === item.id;
 
     return (
       <Painel style={locais.cartao}>
-        <Text style={locais.nome}>{item.nome}{proprioUsuario ? ' (você)' : ''}</Text>
-        <Text style={locais.email}>{item.email}</Text>
-        <Text style={locais.nivel}>Nível: {item.nivel}</Text>
+
+        <Text style={locais.nome}>
+          {item.nome}
+          {proprioUsuario ? ' (você)' : ''}
+        </Text>
+
+        <Text style={locais.email}>
+          {item.email}
+        </Text>
+
+        <View style={locais.areaNivel}>
+          <Text style={locais.rotuloNivel}>
+            NÍVEL DE ACESSO
+          </Text>
+
+          <Text style={locais.nivel}>
+            {nomeNivel(item.nivel)}
+          </Text>
+        </View>
+
         {proprioUsuario ? (
-          <Text style={locais.observacao}>Seu próprio nível não pode ser alterado.</Text>
+          <Text style={locais.observacao}>
+            Seu próprio nível de acesso não pode
+            ser alterado.
+          </Text>
         ) : (
-          <Botao
-            titulo={item.nivel === 'admin' ? 'Tornar usuário' : 'Tornar administrador'}
-            variante="secundario"
-            disabled={alterandoId !== null}
-            carregando={alterandoId === item.id}
-            onPress={function () { alterarNivel(item); }}
-          />
+          <View style={locais.acoes}>
+            <Text style={locais.tituloAcoes}>
+              Alterar para:
+            </Text>
+
+            {niveis
+              .filter(function (nivel) {
+                return nivel !== item.nivel;
+              })
+              .map(function (nivel) {
+                return (
+                  <Botao
+                    key={nivel}
+                    titulo={nomeNivel(nivel)}
+                    variante="secundario"
+                    disabled={alterandoId !== null}
+                    carregando={alterandoEste}
+                    onPress={function () {
+                      confirmarAlteracao(item, nivel);
+                    }}
+                  />
+                );
+              })}
+          </View>
         )}
+
       </Painel>
     );
   }
 
-  // Ocultar a tela não substitui somenteAdmin, que protege GET e PUT na API.
+  // BLOQUEAR ACESSO NÃO AUTORIZADO
   if (usuario?.nivel !== 'admin') {
-    return <Pagina><Aviso mensagem="Acesso permitido apenas para administradores." /></Pagina>;
+    return (
+      <Pagina>
+        <Aviso
+          mensagem="Acesso permitido apenas para administradores."
+        />
+      </Pagina>
+    );
   }
 
   return (
-    <SafeAreaView style={locais.tela} edges={['left', 'right', 'bottom']}>
+    <SafeAreaView
+      style={locais.tela}
+      edges={['left', 'right', 'bottom']}
+    >
       <FlatList
         data={usuarios}
         extraData={alterandoId}
-        keyExtractor={function (item) { return String(item.id); }}
+        keyExtractor={(item) => String(item.id)}
         renderItem={renderizarUsuario}
         contentContainerStyle={locais.conteudo}
         refreshing={carregando}
-        onRefresh={function () { carregarUsuarios(); }}
+        onRefresh={() => carregarUsuarios()}
+
         ListHeaderComponent={
           <View style={locais.cabecalho}>
-            <Text style={estilos.etiqueta}>ADMINISTRAÇÃO / ACESSOS</Text>
-            <Text style={estilos.titulo}>Usuários</Text>
-            <Text style={estilos.subtitulo}>Gerencie quem pode administrar os produtos e os níveis de acesso.</Text>
+
+            <Text style={estilos.etiqueta}>
+              PETMATCH / ADMINISTRAÇÃO
+            </Text>
+
+            <Text style={estilos.titulo}>
+              Gerenciar usuários
+            </Text>
+
+            <Text style={estilos.subtitulo}>
+              Visualize as contas cadastradas
+              e gerencie as permissões de
+              adotantes, ONGs e protetores.
+            </Text>
+
             <Aviso mensagem={erro} />
-            <Aviso mensagem={sucesso} tipo="sucesso" />
-            <Botao titulo="Atualizar lista" variante="secundario" disabled={carregando || alterandoId !== null} onPress={function () { carregarUsuarios(); }} />
-            <Text style={locais.contagem}>{usuarios.length} usuário(s) cadastrado(s)</Text>
+
+            <Aviso
+              mensagem={sucesso}
+              tipo="sucesso"
+            />
+
+            <Botao
+              titulo="Atualizar lista"
+              variante="secundario"
+              disabled={
+                carregando ||
+                alterandoId !== null
+              }
+              onPress={() => carregarUsuarios()}
+            />
+
+            <Text style={locais.contagem}>
+              {usuarios.length} usuário(s) cadastrado(s)
+            </Text>
+
           </View>
         }
-        ListEmptyComponent={carregando ? <Carregamento mensagem="Carregando usuários..." /> : (
-          <Painel><Text style={estilos.texto}>{erro ? 'Não foi possível carregar os usuários. Tente atualizar a lista.' : 'Nenhum usuário encontrado.'}</Text></Painel>
-        )}
+
+        ListEmptyComponent={
+          carregando ? (
+            <Carregamento
+              mensagem="Carregando usuários..."
+            />
+          ) : (
+            <Painel>
+              <Text style={estilos.texto}>
+                {erro
+                  ? 'Não foi possível carregar os usuários.'
+                  : 'Nenhum usuário encontrado.'}
+              </Text>
+            </Painel>
+          )
+        }
       />
     </SafeAreaView>
   );
 }
 
 const locais = StyleSheet.create({
-  tela: { flex: 1, backgroundColor: cores.fundo },
-  conteudo: { width: '100%', maxWidth: 960, alignSelf: 'center', padding: 22, paddingBottom: 48, flexGrow: 1 },
-  cabecalho: { marginBottom: 18 },
-  cartao: { marginBottom: 16 },
-  nome: { color: cores.texto, fontSize: 21, fontWeight: '700', marginBottom: 8 },
-  email: { color: cores.muted, fontSize: 15, marginBottom: 10 },
-  nivel: { color: cores.verde, fontSize: 15, fontWeight: '600', marginBottom: 18 },
-  observacao: { color: cores.muted, fontSize: 13, lineHeight: 20 },
-  contagem: { color: cores.muted, fontSize: 13, marginTop: 20 },
+  tela: {
+    flex: 1,
+    backgroundColor: cores.fundo,
+  },
+
+  conteudo: {
+    width: '100%',
+    maxWidth: 960,
+    alignSelf: 'center',
+    padding: 22,
+    paddingBottom: 48,
+    flexGrow: 1,
+  },
+
+  cabecalho: {
+    marginBottom: 18,
+    gap: 12,
+  },
+
+  cartao: {
+    marginBottom: 16,
+  },
+
+  nome: {
+    color: cores.texto,
+    fontSize: 21,
+    fontWeight: '700',
+    marginBottom: 8,
+  },
+
+  email: {
+    color: cores.muted,
+    fontSize: 15,
+    marginBottom: 14,
+  },
+
+  areaNivel: {
+    backgroundColor: '#E8EFE4',
+    padding: 12,
+    borderRadius: 12,
+    marginBottom: 16,
+  },
+
+  rotuloNivel: {
+    color: cores.muted,
+    fontSize: 11,
+    fontWeight: '700',
+    marginBottom: 5,
+  },
+
+  nivel: {
+    color: cores.verde,
+    fontSize: 16,
+    fontWeight: '700',
+  },
+
+  acoes: {
+    gap: 10,
+  },
+
+  tituloAcoes: {
+    color: cores.texto,
+    fontSize: 14,
+    fontWeight: '600',
+    marginBottom: 4,
+  },
+
+  observacao: {
+    color: cores.muted,
+    fontSize: 13,
+    lineHeight: 20,
+  },
+
+  contagem: {
+    color: cores.muted,
+    fontSize: 13,
+    marginTop: 12,
+  },
 });
 ```
 
 
-### loja-jwt/scripts/gerar-entrega.js
+### petmatch/scripts/gerar-entrega.js
 
 ```js
 // Consolida os fontes reais em um único material, mantendo a ordem pedida:
@@ -2508,8 +9577,8 @@ function comandosDaEntrega() {
     'Para criar um projeto novo durante a construção em aula:',
     '',
     cercarCodigo([
-      'npx create-expo-app@latest loja-jwt --template blank',
-      'cd loja-jwt',
+      'npx create-expo-app@latest petmatch --template blank',
+      'cd petmatch',
       'npm install @react-navigation/native',
       'npm install @react-navigation/native-stack',
       'npx expo install react-native-screens react-native-safe-area-context',
@@ -2519,13 +9588,12 @@ function comandosDaEntrega() {
     ].join('\n'), 'bash'),
     'Para executar os arquivos já entregues, entre na pasta e instale as versões do lock:',
     '',
-    cercarCodigo('cd loja-jwt\nnpm ci', 'bash'),
-    'Execute `database/loja_jwt.sql` no MySQL Workbench. No PowerShell, copie o modelo local:',
+    cercarCodigo('cd petmatch\nnpm ci', 'bash'),
+    'Para um banco novo, use `database/petmatch.sql`. CREATE TABLE IF NOT EXISTS não migra tabelas existentes; revise uma migração antes de usar em banco com dados.',
     '',
-    cercarCodigo('Copy-Item -LiteralPath backend/.env.example -Destination backend/.env', 'powershell'),
-    'Preencha o arquivo local com suas configurações e um segredo JWT próprio. Nenhum `.env` acompanha esta entrega.',
+    'A API lê a configuração local de `backend/.env`: DB_HOST, DB_PORT, DB_USER, DB_PASSWORD, DB_NAME=petmatch_db, PORT e JWT_SECRET (pelo menos 32 caracteres). Não sobrescreva um arquivo existente. Nenhum `.env` acompanha esta entrega; não há `.env.example` nesta versão.',
     '',
-    'O SQL insere duas contas demonstrativas: `usuario@loja.com` / `Usuario@123` (nível `usuario`) e `admin@loja.com` / `Admin@123` (nível `admin`). São senhas públicas para aula; no banco, somente hashes bcrypt com custo 10. Ao reimportar, `INSERT IGNORE` preserva contas existentes, inclusive suas senhas e níveis. As credenciais acima valem para as contas criadas pelo SQL.',
+    'O SQL define as quatro tabelas do PetMatch e não insere contas ou senhas demonstrativas.',
     '',
     'Opcionalmente, configure `ADMIN_NOME`, `ADMIN_EMAIL` e `ADMIN_SENHA` no `.env` para criar um administrador próprio com outro e-mail. O script não altera a senha nem o nível de uma conta existente:',
     '',
@@ -2556,11 +9624,11 @@ async function gerarEntrega() {
   const estrutura = await lerEstrutura(pastaProjeto);
   const arquivos = listarArquivos(estrutura);
   const partes = [
-    '# LOJA JWT — entrega completa',
+    '# PetMatch — entrega completa',
     '',
     '## 1. Estrutura completa de pastas e arquivos',
     '',
-    cercarCodigo('loja-jwt/\n' + desenharArvore(estrutura).join('\n'), 'text'),
+    cercarCodigo('petmatch/\n' + desenharArvore(estrutura).join('\n'), 'text'),
     'A árvore lista os fontes e os assets originais. Imagens são entregues nos arquivos de `assets/` e não são convertidas em texto neste documento. Dependências instaladas, caches, resultados gerados e credenciais locais ficam fora da consolidação.',
     '',
     comandosDaEntrega(),
@@ -2573,7 +9641,7 @@ async function gerarEntrega() {
     if (!arquivo.texto) continue;
     const conteudo = await readFile(path.join(pastaProjeto, arquivo.relativo), 'utf8');
     if (conteudo.includes('\u0000')) throw new Error('Arquivo classificado como texto contém bytes nulos: ' + arquivo.relativo);
-    partes.push('### loja-jwt/' + arquivo.relativo, '', cercarCodigo(conteudo, linguagemArquivo(arquivo.nome)), '');
+    partes.push('### petmatch/' + arquivo.relativo, '', cercarCodigo(conteudo, linguagemArquivo(arquivo.nome)), '');
     quantidadeTexto += 1;
   }
 
@@ -2589,7 +9657,7 @@ gerarEntrega().catch(function informarErro(erro) {
 ```
 
 
-### loja-jwt/scripts/testar-mysql.js
+### petmatch/scripts/testar-mysql.js
 
 ```js
 import { spawn } from 'node:child_process';
@@ -2624,7 +9692,7 @@ if (!binario) {
 ```
 
 
-### loja-jwt/scripts/testar-web.js
+### petmatch/scripts/testar-web.js
 
 ```js
 // Inicia somente o servidor necessário aos testes e encerra apenas o processo
@@ -2706,7 +9774,7 @@ try {
 ```
 
 
-### loja-jwt/services/api.js
+### petmatch/services/api.js
 
 ```js
 // fetch é nativo: não precisamos de Axios para conversar com a API REST.
@@ -2759,7 +9827,7 @@ export async function lerResposta(resposta) {
 ```
 
 
-### loja-jwt/tests/app.spec.js
+### petmatch/tests/app.spec.js
 
 ```js
 import { test, expect } from '@playwright/test';
@@ -2770,24 +9838,20 @@ import { test, expect } from '@playwright/test';
 const SENHA_FICTICIA = 'Senha-apenas-de-teste-123!';
 const TOKEN_USUARIO = 'token-ficticio-usuario-sem-validade';
 const TOKEN_ADMIN = 'token-ficticio-admin-sem-validade';
-const aluno = { id: 2, nome: 'Aluno Teste', email: 'aluno.teste@example.com', nivel: 'usuario' };
+const aluno = { id: 2, nome: 'Aluno Teste', email: 'aluno.teste@example.com', nivel: 'adotante' };
 const administrador = { id: 1, nome: 'Admin Teste', email: 'admin.teste@example.com', nivel: 'admin' };
-const produtoInicial = {
+const animalInicial = {
   id: 1,
-  nome: 'Notebook de teste',
-  descricao: 'Notebook fictício usado na integração do catálogo.',
-  categoria: 'Computadores',
-  preco: '3999.90',
-  estoque: 5,
+  nome: 'Luna', usuario_id: 1, especie: 'Gato', raca: 'SRD', idade: 2, unidade_idade: 'anos', porte: 'Pequeno', sexo: 'Fêmea', cidade: 'Porto Alegre', descricao: 'Gata à espera de uma família.', saude: 'Vacinada', foto: '', status: 'disponivel',
 };
 
 async function simularApi(page) {
   const api = {
     requisicoes: [],
     usuarios: [{ ...administrador }, { ...aluno }],
-    produtos: [{ ...produtoInicial }],
+    animais: [{ ...animalInicial }],
     sessao: 'normal',
-    produtosSemSessao: false,
+    animaisSemSessao: false,
   };
 
   await page.route('http://localhost:3000/**', async function responderRota(route) {
@@ -2817,7 +9881,7 @@ async function simularApi(page) {
       if (api.usuarios.some(function (pessoa) { return pessoa.email === body.email; })) {
         await responder(409, { mensagem: 'E-mail já cadastrado.' });
       } else {
-        api.usuarios.push({ id: 3, nome: body.nome, email: body.email, nivel: 'usuario' });
+        api.usuarios.push({ id: 3, nome: body.nome, email: body.email, nivel: 'adotante' });
         await responder(201, { mensagem: 'Conta criada! Agora entre com seu e-mail e senha.' });
       }
       return;
@@ -2844,38 +9908,43 @@ async function simularApi(page) {
       return;
     }
 
-    if (caminho === '/produtos' && metodo === 'GET') {
-      if (api.produtosSemSessao) {
+    if (caminho === '/animais' && metodo === 'GET') {
+      if (api.animaisSemSessao) {
         await responder(401, { mensagem: 'Token inválido ou expirado.' });
       } else {
-        await responder(200, api.produtos);
+        await responder(200, api.animais);
       }
       return;
     }
 
-    if (caminho === '/produtos' && metodo === 'POST') {
-      const produto = { id: 2, ...body };
-      api.produtos.push(produto);
-      await responder(201, { mensagem: 'Produto cadastrado com sucesso.', produto });
+    if (caminho === '/animais' && metodo === 'POST') {
+      const animal = { id: 2, ...body };
+      api.animais.push(animal);
+      await responder(201, { mensagem: 'Animal cadastrado com sucesso.', animal });
       return;
     }
 
-    if (/^\/produtos\/\d+$/.test(caminho)) {
+    if (/^\/animais\/\d+$/.test(caminho)) {
       const id = Number(caminho.split('/')[2]);
-      const indice = api.produtos.findIndex(function (produto) { return produto.id === id; });
+      const indice = api.animais.findIndex(function (animal) { return animal.id === id; });
       if (indice < 0) {
-        await responder(404, { mensagem: 'Produto não encontrado.' });
+        await responder(404, { mensagem: 'Animal não encontrado.' });
       } else if (metodo === 'GET') {
-        await responder(200, api.produtos[indice]);
+        await responder(200, api.animais[indice]);
       } else if (metodo === 'PUT') {
-        api.produtos[indice] = { id, ...body };
-        await responder(200, { mensagem: 'Produto atualizado com sucesso.', produto: api.produtos[indice] });
+        api.animais[indice] = { id, ...body };
+        await responder(200, { mensagem: 'Animal atualizado com sucesso.', animal: api.animais[indice] });
       } else if (metodo === 'DELETE') {
-        api.produtos.splice(indice, 1);
-        await responder(200, { mensagem: 'Produto excluído com sucesso.' });
+        api.animais.splice(indice, 1);
+        await responder(200, { mensagem: 'Animal excluído com sucesso.' });
       } else {
         await responder(405, { mensagem: 'Método inesperado no teste.' });
       }
+      return;
+    }
+
+    if (caminho === '/favoritos' && metodo === 'GET') {
+      await responder(200, []);
       return;
     }
 
@@ -2901,15 +9970,15 @@ async function simularApi(page) {
 function campo(page, rotulo) {
   // A pilha pode manter a tela anterior montada. Usamos o campo visível com
   // o rótulo acessível que também é apresentado ao aluno.
-  return page.locator('[aria-label="' + rotulo + '"]:visible');
+  return page.getByPlaceholder(rotulo, { exact: true }).filter({ visible: true });
 }
 
 async function entrar(page, usuario = aluno) {
   await page.goto('/');
-  await campo(page, 'E-mail').fill(usuario.email);
-  await campo(page, 'Senha').fill(SENHA_FICTICIA);
+  await campo(page, 'seuemail@exemplo.com').fill(usuario.email);
+  await campo(page, 'Digite sua senha').fill(SENHA_FICTICIA);
   await page.getByRole('button', { name: 'Entrar', exact: true }).click();
-  await expect(page.getByText('Olá, ' + usuario.nome, { exact: true })).toBeVisible();
+  await expect(page.getByText('Ver todos os animais', { exact: true })).toBeVisible();
 }
 
 async function tokenSalvo(page) {
@@ -2924,194 +9993,90 @@ async function conferirAusenciaDeSenhaSalva(page) {
   expect(armazenamento).not.toMatch(/"(?:senha|password|confirmacao)"\s*:/i);
 }
 
-test('cadastro valida dados, exibe conflito e envia somente os campos públicos', async function ({ page }) {
+test('cadastro envia apenas dados públicos e entra como adotante', async function ({ page }) {
   const api = await simularApi(page);
   await page.goto('/');
-  await page.getByRole('button', { name: 'Criar uma conta', exact: true }).click();
-  await campo(page, 'Nome').fill('Nova Aluna');
-  await campo(page, 'E-mail').fill(aluno.email);
-  await campo(page, 'Senha').fill('curta');
-  await campo(page, 'Confirmar senha').fill('curta');
-  await page.getByRole('button', { name: 'Cadastrar', exact: true }).click();
-  await expect(page.getByRole('alert')).toHaveText('A senha deve ter pelo menos 8 caracteres.');
-  expect(api.requisicoes).toHaveLength(0);
-
-  await campo(page, 'Senha').fill(SENHA_FICTICIA);
-  await campo(page, 'Confirmar senha').fill('confirmacao-diferente');
-  await page.getByRole('button', { name: 'Cadastrar', exact: true }).click();
-  await expect(page.getByRole('alert')).toHaveText('As senhas não são iguais.');
-  expect(api.requisicoes).toHaveLength(0);
-
-  await campo(page, 'Confirmar senha').fill(SENHA_FICTICIA);
-  await page.getByRole('button', { name: 'Cadastrar', exact: true }).click();
-  await expect(page.getByRole('alert')).toHaveText('E-mail já cadastrado.');
-  await campo(page, 'E-mail').fill('nova.aluna@example.com');
-  await page.getByRole('button', { name: 'Cadastrar', exact: true }).click();
-  await expect(page.getByRole('alert')).toHaveText('Conta criada! Agora entre com seu e-mail e senha.');
-
-  const cadastro = api.requisicoes.at(-1);
-  expect(cadastro.caminho).toBe('/auth/cadastro');
-  expect(cadastro.body).toEqual({ nome: 'Nova Aluna', email: 'nova.aluna@example.com', senha: SENHA_FICTICIA });
-  expect(cadastro.authorization).toBe('');
-  expect(await tokenSalvo(page)).toBeNull();
+  await page.getByText('Criar minha conta', { exact: true }).click();
+  await campo(page, 'Digite seu nome').fill('Nova Adotante');
+  await campo(page, 'seuemail@exemplo.com').fill('nova@example.test');
+  await campo(page, 'Pelo menos 8 caracteres').fill(SENHA_FICTICIA);
+  await campo(page, 'Digite sua senha novamente').fill(SENHA_FICTICIA);
+  await page.getByRole('button', { name: 'Criar minha conta', exact: true }).click();
+  await expect(page.getByText('Ver todos os animais', { exact: true })).toBeVisible();
+  expect(api.requisicoes.find((item) => item.caminho === '/auth/cadastro').body).toEqual({ nome: 'Nova Adotante', email: 'nova@example.test', senha: SENHA_FICTICIA });
   await conferirAusenciaDeSenhaSalva(page);
-  await page.getByRole('button', { name: 'Voltar para o login', exact: true }).click();
-  await expect(page.getByRole('button', { name: 'Entrar', exact: true })).toBeVisible();
 });
 
-test('login comum consulta catálogo e detalhes com Bearer e sem controles administrativos', async function ({ page }) {
-  const api = await simularApi(page);
-  await page.goto('/');
-  await campo(page, 'E-mail').fill(aluno.email);
-  await campo(page, 'Senha').fill('senha-ficticia-incorreta');
-  await page.getByRole('button', { name: 'Entrar', exact: true }).click();
-  await expect(page.getByRole('alert')).toHaveText('E-mail ou senha inválidos');
-  expect(await tokenSalvo(page)).toBeNull();
-
-  await campo(page, 'Senha').fill(SENHA_FICTICIA);
-  await page.getByRole('button', { name: 'Entrar', exact: true }).click();
-  await expect(page.getByText('Olá, ' + aluno.nome, { exact: true })).toBeVisible();
-  expect(await tokenSalvo(page)).toBe(TOKEN_USUARIO);
-  await conferirAusenciaDeSenhaSalva(page);
-  await expect(page.getByRole('button', { name: 'Cadastrar produto', exact: true })).toHaveCount(0);
-  await expect(page.getByRole('button', { name: 'Gerenciar usuários', exact: true })).toHaveCount(0);
-
-  await page.getByRole('button', { name: 'Ver produtos', exact: true }).click();
-  await expect(page.getByText(produtoInicial.nome, { exact: true })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Editar', exact: true })).toHaveCount(0);
-  await expect(page.getByRole('button', { name: 'Excluir', exact: true })).toHaveCount(0);
-  await page.getByRole('button', { name: 'Ver detalhes', exact: true }).click();
-  await expect(page.getByText(produtoInicial.descricao, { exact: true })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Editar produto', exact: true })).toHaveCount(0);
-
-  const consultas = api.requisicoes.filter(function (item) { return item.metodo === 'GET'; });
-  expect(consultas.some(function (item) { return item.caminho === '/produtos'; })).toBe(true);
-  expect(consultas.some(function (item) { return item.caminho === '/produtos/1'; })).toBe(true);
-  for (const consulta of consultas) expect(consulta.authorization).toBe('Bearer ' + TOKEN_USUARIO);
-});
-
-test('recarregar restaura a sessão por /me e logout remove o token', async function ({ page }) {
+test('adotante consulta animais e detalhes usando Bearer', async function ({ page }) {
   const api = await simularApi(page);
   await entrar(page);
-  const consultasAntes = api.requisicoes.filter(function (item) { return item.caminho === '/auth/me'; }).length;
-  await page.reload();
-  await expect(page.getByText('Olá, ' + aluno.nome, { exact: true })).toBeVisible();
-  expect(await tokenSalvo(page)).toBe(TOKEN_USUARIO);
-  expect(api.requisicoes.filter(function (item) { return item.caminho === '/auth/me'; }).length).toBeGreaterThan(consultasAntes);
+  await page.getByText('Ver todos os animais', { exact: true }).click();
+  await expect(page.getByText('Luna', { exact: true }).filter({ visible: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Cadastrar animal', exact: true })).toHaveCount(0);
+  await page.getByRole('button', { name: 'Conhecer este pet', exact: true }).click();
+  await expect(page.getByText(animalInicial.descricao, { exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Quero adotar', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Editar informações', exact: true })).toHaveCount(0);
+  const consultas = api.requisicoes.filter((item) => item.caminho.startsWith('/animais'));
+  expect(consultas.some((item) => item.caminho === '/animais/1')).toBe(true);
+  for (const consulta of consultas) expect(consulta.authorization).toBe('Bearer ' + TOKEN_USUARIO);
   await conferirAusenciaDeSenhaSalva(page);
-
-  await page.getByRole('button', { name: 'Sair', exact: true }).click();
-  await expect(page.getByRole('button', { name: 'Entrar', exact: true })).toBeVisible();
-  await expect(page.getByRole('alert')).toHaveText('Você saiu da sua conta.');
-  expect(await tokenSalvo(page)).toBeNull();
-  await page.reload();
-  await expect(page.getByRole('button', { name: 'Entrar', exact: true })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Ver produtos', exact: true })).toHaveCount(0);
 });
 
-test('token recusado durante a restauração volta ao login com aviso e limpa a sessão', async function ({ page }) {
+test('recarregar restaura sessão e sair remove o token', async function ({ page }) {
+  const api = await simularApi(page);
+  await entrar(page);
+  await page.reload();
+  await expect(page.getByText('Ver todos os animais', { exact: true })).toBeVisible();
+  expect(api.requisicoes.some((item) => item.caminho === '/auth/me')).toBe(true);
+  await page.getByText('Sair', { exact: true }).click();
+  await expect(page.getByText('Você saiu da sua conta.', { exact: true })).toBeVisible();
+  expect(await tokenSalvo(page)).toBeNull();
+});
+
+test('401 na restauração encerra sessão', async function ({ page }) {
   const api = await simularApi(page);
   await entrar(page);
   api.sessao = 'invalida';
   await page.reload();
-  await expect(page.getByRole('button', { name: 'Entrar', exact: true })).toBeVisible();
-  await expect(page.getByRole('alert')).toHaveText('Sua sessão expirou ou é inválida. Entre novamente.');
+  await expect(page.getByText('Sua sessão expirou. Entre novamente.', { exact: true })).toBeVisible();
   expect(await tokenSalvo(page)).toBeNull();
 });
 
-test('falha de rede preserva o token e permite tentar restaurar a sessão novamente', async function ({ page }) {
+test('falha de rede permite restaurar sessão sem perder token', async function ({ page }) {
   const api = await simularApi(page);
   await entrar(page);
   api.sessao = 'offline';
   await page.reload();
   await expect(page.getByText('Vamos reconectar?', { exact: true })).toBeVisible();
-  await expect(page.getByRole('alert')).toContainText('Não foi possível verificar a sessão.');
   expect(await tokenSalvo(page)).toBe(TOKEN_USUARIO);
   api.sessao = 'normal';
   await page.getByRole('button', { name: 'Tentar novamente', exact: true }).click();
-  await expect(page.getByText('Olá, ' + aluno.nome, { exact: true })).toBeVisible();
-  expect(await tokenSalvo(page)).toBe(TOKEN_USUARIO);
+  await expect(page.getByText('Ver todos os animais', { exact: true })).toBeVisible();
 });
 
-test('resposta 401 em uma rota protegida encerra a sessão ativa', async function ({ page }) {
+test('401 durante consulta de animais encerra sessão ativa', async function ({ page }) {
   const api = await simularApi(page);
   await entrar(page);
-  api.produtosSemSessao = true;
-  await page.getByRole('button', { name: 'Ver produtos', exact: true }).click();
-  await expect(page.getByRole('button', { name: 'Entrar', exact: true })).toBeVisible();
-  await expect(page.getByRole('alert')).toHaveText('Sua sessão expirou ou é inválida. Entre novamente.');
+  api.animaisSemSessao = true;
+  await page.getByText('Ver todos os animais', { exact: true }).click();
+  await expect(page.getByText('Sua sessão expirou. Entre novamente.', { exact: true })).toBeVisible();
   expect(await tokenSalvo(page)).toBeNull();
 });
 
-test('admin cadastra, edita e exclui produto após confirmar e a lista reflete o CRUD', async function ({ page }) {
-  const api = await simularApi(page);
+test('administrador acessa gerenciamento de animais e usuários', async function ({ page }) {
+  await simularApi(page);
   await entrar(page, administrador);
-  await page.getByRole('button', { name: 'Ver produtos', exact: true }).click();
-  await page.getByRole('button', { name: 'Ver detalhes', exact: true }).click();
-  await page.getByRole('button', { name: 'Editar produto', exact: true }).click();
-  await expect(campo(page, 'Nome *')).toHaveValue(produtoInicial.nome);
-  await campo(page, 'Nome *').fill('Notebook revisado');
-  await campo(page, 'Preço (R$) *').fill('4299,90');
-  await page.getByRole('button', { name: 'Salvar alterações', exact: true }).click();
-  await expect(page.getByRole('alert')).toHaveText('Produto atualizado com sucesso.');
-  await page.getByRole('button', { name: 'Voltar', exact: true }).click();
-  await expect(page.getByText('Notebook revisado', { exact: true })).toBeVisible();
-  await page.getByRole('button', { name: 'Voltar', exact: true }).click();
-  await expect(page.getByText('Notebook revisado', { exact: true })).toBeVisible();
-  await page.getByRole('button', { name: 'Cadastrar produto', exact: true }).click();
-  await campo(page, 'Nome *').fill('Mouse de teste');
-  await campo(page, 'Descrição').fill('Produto criado pelo cenário de integração.');
-  await campo(page, 'Categoria').fill('Periféricos');
-  await campo(page, 'Preço (R$) *').fill('79,90');
-  await campo(page, 'Estoque *').fill('12');
-  await page.getByRole('button', { name: 'Cadastrar produto', exact: true }).click();
-  await expect(page.getByRole('alert')).toHaveText('Produto cadastrado com sucesso.');
-  await page.getByRole('button', { name: 'Ver catálogo', exact: true }).click();
-  const cartaoMouse = page.getByText('Mouse de teste', { exact: true }).locator('..');
-  await expect(cartaoMouse).toBeVisible();
-  await cartaoMouse.getByRole('button', { name: 'Excluir', exact: true }).click();
-  await expect(page.getByRole('button', { name: 'Confirmar exclusão', exact: true })).toBeVisible();
-  expect(api.requisicoes.some(function (item) { return item.metodo === 'DELETE'; })).toBe(false);
-  await page.getByRole('button', { name: 'Cancelar', exact: true }).click();
-  await expect(cartaoMouse).toBeVisible();
-  await cartaoMouse.getByRole('button', { name: 'Excluir', exact: true }).click();
-  await page.getByRole('button', { name: 'Confirmar exclusão', exact: true }).click();
-  await expect(page.getByRole('alert')).toHaveText('Produto excluído com sucesso.');
-  await expect(page.getByText('Mouse de teste', { exact: true })).toHaveCount(0);
-
-  const escrita = api.requisicoes.filter(function (item) { return ['POST', 'PUT', 'DELETE'].includes(item.metodo) && item.caminho.startsWith('/produtos'); });
-  expect(escrita.map(function (item) { return item.metodo; })).toEqual(['PUT', 'POST', 'DELETE']);
-  expect(escrita[0].body.preco).toBe(4299.9);
-  expect(escrita[1].body).toEqual({ nome: 'Mouse de teste', descricao: 'Produto criado pelo cenário de integração.', categoria: 'Periféricos', preco: 79.9, estoque: 12 });
-  for (const requisicao of escrita) expect(requisicao.authorization).toBe('Bearer ' + TOKEN_ADMIN);
-});
-
-test('admin lista usuários e altera outro nível sem oferecer alteração do próprio', async function ({ page }) {
-  const api = await simularApi(page);
-  await entrar(page, administrador);
-  await page.getByRole('button', { name: 'Gerenciar usuários', exact: true }).click();
+  await expect(page.getByText('Cadastrar animal', { exact: true })).toBeVisible();
+  await page.getByText('Gerenciar usuários', { exact: true }).click();
   await expect(page.getByText(administrador.nome + ' (você)', { exact: true })).toBeVisible();
-  await expect(page.getByText('Seu próprio nível não pode ser alterado.', { exact: true })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Tornar usuário', exact: true })).toHaveCount(0);
-  await page.getByRole('button', { name: 'Tornar administrador', exact: true }).click();
-  await expect(page.getByRole('alert')).toHaveText('Nível atualizado com sucesso.');
-  await expect(page.getByRole('button', { name: 'Tornar usuário', exact: true })).toBeVisible();
-  await page.getByRole('button', { name: 'Tornar usuário', exact: true }).click();
-  await expect(page.getByRole('button', { name: 'Tornar administrador', exact: true })).toBeVisible();
-
-  const alteracoes = api.requisicoes.filter(function (item) { return item.metodo === 'PUT' && item.caminho.startsWith('/usuarios'); });
-  expect(alteracoes.map(function (item) { return item.body.nivel; })).toEqual(['admin', 'usuario']);
-  for (const requisicao of alteracoes) {
-    expect(requisicao.caminho).toBe('/usuarios/2/nivel');
-    expect(requisicao.authorization).toBe('Bearer ' + TOKEN_ADMIN);
-  }
-  expect(api.requisicoes.filter(function (item) { return item.caminho === '/usuarios' && item.metodo === 'GET'; }).length).toBeGreaterThanOrEqual(3);
-  await conferirAusenciaDeSenhaSalva(page);
+  await expect(page.getByRole('button', { name: 'ONG', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Protetor independente', exact: true })).toBeVisible();
 });
 ```
 
 
-### loja-jwt/.gitignore
+### petmatch/.gitignore
 
 ```text
 # Learn more https://docs.github.com/en/get-started/getting-started-with-git/ignoring-files
@@ -3167,10 +10132,10 @@ playwright-report/
 ```
 
 
-### loja-jwt/AGENTS.md
+### petmatch/AGENTS.md
 
 ````markdown
-# LOJA JWT
+# PetMatch
 
 Projeto didático para alunos do 3º ano do Ensino Médio Técnico. Priorize código
 simples, funções tradicionais, comentários explicativos em português e
@@ -3187,9 +10152,9 @@ compatibilidade com Expo Web, Android e iOS.
 - Todo código Node usa ES Modules e extensão `.js` nos imports locais.
 - Use `fetch`, Express, mysql2/promise, bcryptjs e jsonwebtoken, sem ORM.
 - Nunca versione `backend/.env`, salve senhas no aplicativo ou retorne hashes.
-- Cadastro público define `usuario` no servidor. Rotas administrativas exigem
+- Cadastro público define `adotante` no servidor. Rotas administrativas exigem
   `autenticarToken` e `somenteAdmin`; o nível atual vem do banco.
-- Não acrescente pagamento, carrinho, frete, checkout ou imagens de produtos.
+- Não acrescente pagamento, carrinho, frete, checkout ou funcionalidades de comércio.
 
 As instruções específicas acima substituem as recomendações genéricas de
 navegação do template do Expo que originou este projeto.
@@ -3224,7 +10189,7 @@ and `npm run test:mysql` for the optional isolated MySQL integration test.
 
 - Use Native Stack in `App.js`, as required by the teaching plan.
 - Keep screens in `screens/` and shared visual components in `components/`.
-- Pass the product ID through `route.params.id` and session data through Props.
+- Pass the animal ID through `route.params.id` and session data through Props.
 - Docs: https://reactnavigation.org/docs/getting-started/
 
 ## Building with EAS
@@ -3240,10 +10205,10 @@ Docs: https://docs.expo.dev/eas/index.md
 ````
 
 
-### loja-jwt/App.js
+### petmatch/App.js
 
 ```js
-// App controla a sessão; as telas recebem os dados por Props, sem Redux ou Context.
+
 import { useCallback, useEffect, useState } from 'react';
 import { Text } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
@@ -3251,16 +10216,42 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
+
+// TELAS DE AUTENTICAÇÃO
 import Login from './screens/Login.js';
 import CadastroUsuario from './screens/CadastroUsuario.js';
+
+// TELAS PRINCIPAIS
 import Home from './screens/Home.js';
-import Produtos from './screens/Produtos.js';
-import DetalhesProduto from './screens/DetalhesProduto.js';
-import CadastrarProduto from './screens/CadastrarProduto.js';
-import EditarProduto from './screens/EditarProduto.js';
+import Animais from './screens/Animais.js';
+import DetalhesAnimal from './screens/DetalhesAnimal.js';
+import Perfil from './screens/Perfil.js';
+import Favoritos from './screens/Favoritos.js';
+import MinhasSolicitacoes from './screens/MinhasSolicitacoes.js';
+import SolicitarAdocao from './screens/SolicitarAdocao.js';
+
+// TELAS DE GERENCIAMENTO
+import CadastrarAnimal from './screens/CadastrarAnimal.js';
+import EditarAnimal from './screens/EditarAnimal.js';
 import Usuarios from './screens/Usuarios.js';
-import { configurarSessaoExpirada, fetchAutenticado, lerResposta } from './services/api.js';
-import { Aviso, Botao, Carregamento, Pagina, Painel, cores, estilos } from './components/ui.js';
+
+// API
+import {
+  configurarSessaoExpirada,
+  fetchAutenticado,
+  lerResposta,
+} from './services/api.js';
+
+// COMPONENTES
+import {
+  Aviso,
+  Botao,
+  Carregamento,
+  Pagina,
+  Painel,
+  cores,
+  estilos,
+} from './components/ui.js';
 
 const Stack = createNativeStackNavigator();
 
@@ -3270,37 +10261,48 @@ export default function App() {
   const [aviso, setAviso] = useState('');
   const [erroInicial, setErroInicial] = useState('');
 
-  // Uma função estável evita que atualizar o usuário refaça o efeito da Home.
-  const atualizarUsuario = useCallback(function atualizarUsuario(dados) {
+  const atualizarUsuario = useCallback((dados) => {
     setUsuario(dados);
   }, []);
 
   async function restaurarSessao() {
     setCarregando(true);
     setErroInicial('');
+
     try {
-      // Somente o token é persistido. Os dados do usuário vêm novamente da API.
       const token = await AsyncStorage.getItem('token');
-      if (token) {
-        const resposta = await fetchAutenticado('/auth/me');
-        const dados = await lerResposta(resposta);
-        setUsuario(dados);
+
+      if (!token) {
+        setUsuario(null);
+        return;
       }
+
+      const resposta = await fetchAutenticado('/auth/me');
+      const dados = await lerResposta(resposta);
+
+      setUsuario(dados);
     } catch (erro) {
-      if (erro.status !== 401) {
-        // Falha de rede não significa token inválido: permitimos tentar novamente.
-        setErroInicial('Não foi possível verificar a sessão. Confira a API e sua conexão.');
+      if (erro.status === 401) {
+        await AsyncStorage.removeItem('token');
+        setUsuario(null);
+      } else {
+        setErroInicial(
+          'Não foi possível verificar sua sessão. Confira a API e sua conexão.'
+        );
       }
-    } finally { setCarregando(false); }
+    } finally {
+      setCarregando(false);
+    }
   }
 
-  useEffect(function iniciarAplicativo() {
-    // Qualquer rota protegida que responder 401 avisa o App para trocar o fluxo.
-    const cancelar = configurarSessaoExpirada(function aoExpirar() {
+  useEffect(() => {
+    const cancelar = configurarSessaoExpirada(() => {
       setUsuario(null);
-      setAviso('Sua sessão expirou ou é inválida. Entre novamente.');
+      setAviso('Sua sessão expirou. Entre novamente.');
     });
+
     restaurarSessao();
+
     return cancelar;
   }, []);
 
@@ -3315,57 +10317,223 @@ export default function App() {
       setUsuario(null);
       setAviso('Você saiu da sua conta.');
     } catch {
-      setAviso('Não foi possível remover a sessão. Tente sair novamente.');
+      setAviso('Não foi possível sair. Tente novamente.');
     }
   }
 
   function renderizarConteudo() {
-    if (carregando) { return <Carregamento mensagem="Verificando sua sessão…" />; }
-    if (erroInicial) {
-      return <Pagina><Painel>
-        <Text style={estilos.titulo}>Vamos reconectar?</Text>
-        <Aviso mensagem={erroInicial} />
-        <Botao titulo="Tentar novamente" onPress={restaurarSessao} />
-      </Painel></Pagina>;
+    if (carregando) {
+      return <Carregamento mensagem="Carregando PetMatch..." />;
     }
+
+    if (erroInicial) {
+      return (
+        <Pagina>
+          <Painel>
+            <Text style={estilos.titulo}>
+              Vamos reconectar?
+            </Text>
+
+            <Aviso mensagem={erroInicial} />
+
+            <Botao
+              titulo="Tentar novamente"
+              onPress={restaurarSessao}
+            />
+          </Painel>
+        </Pagina>
+      );
+    }
+
+    const podeGerenciar =
+      usuario?.nivel === 'ong' ||
+      usuario?.nivel === 'protetor' ||
+      usuario?.nivel === 'admin';
+
+    const ehAdmin = usuario?.nivel === 'admin';
+
     return (
       <NavigationContainer>
-        <Stack.Navigator id="Loja" screenOptions={{
-          headerStyle: { backgroundColor: cores.papel }, headerTintColor: cores.texto,
-          headerTitleStyle: { fontWeight: '700' }, contentStyle: { backgroundColor: cores.fundo },
-          headerShadowVisible: false,
-        }}>
-          {/* Alterar usuario troca a pilha: Voltar não reabre uma sessão encerrada. */}
+        <Stack.Navigator
+          id="PetMatch"
+          screenOptions={{
+            headerStyle: {
+              backgroundColor: cores.papel,
+            },
+            headerTintColor: cores.texto,
+            headerTitleStyle: {
+              fontWeight: '700',
+            },
+            contentStyle: {
+              backgroundColor: cores.fundo,
+            },
+            headerShadowVisible: false,
+          }}
+        >
           {usuario === null ? (
             <Stack.Group navigationKey="publico">
-              <Stack.Screen name="Login" options={{ headerShown: false }}>
-                {function telaLogin(props) { return <Login {...props} aoEntrar={entrar} avisoSessao={aviso} />; }}
+              <Stack.Screen
+                name="Login"
+                options={{ headerShown: false }}
+              >
+                {(props) => (
+                  <Login
+                    {...props}
+                    aoEntrar={entrar}
+                    avisoSessao={aviso}
+                  />
+                )}
               </Stack.Screen>
-              <Stack.Screen name="CadastroUsuario" component={CadastroUsuario} options={{ title: 'Criar conta' }} />
+
+              <Stack.Screen
+                name="CadastroUsuario"
+                options={{
+                  headerShown: false,
+                }}
+              >
+                {(props) => (
+                  <CadastroUsuario
+                    {...props}
+                    aoEntrar={entrar}
+                  />
+                )}
+              </Stack.Screen>
             </Stack.Group>
           ) : (
             <Stack.Group navigationKey={'sessao-' + usuario.id}>
-              <Stack.Screen name="Home" options={{ title: 'LOJA JWT' }}>
-                {function telaHome(props) { return <Home {...props} usuario={usuario} sair={sair} atualizarUsuario={atualizarUsuario} aviso={aviso} />; }}
+              <Stack.Screen
+                name="Home"
+                options={{
+                  title: 'PetMatch',
+                  headerShown: false,
+                }}
+              >
+                {(props) => (
+                  <Home
+                    {...props}
+                    usuario={usuario}
+                    sair={sair}
+                    atualizarUsuario={atualizarUsuario}
+                    aviso={aviso}
+                  />
+                )}
               </Stack.Screen>
-              <Stack.Screen name="Produtos" options={{ title: 'Produtos' }}>
-                {function telaProdutos(props) { return <Produtos {...props} usuario={usuario} />; }}
+
+              <Stack.Screen
+                name="Animais"
+                options={{
+                  title: 'Animais para adoção',
+                }}
+              >
+                {(props) => (
+                  <Animais
+                    {...props}
+                    usuario={usuario}
+                  />
+                )}
               </Stack.Screen>
-              <Stack.Screen name="DetalhesProduto" options={{ title: 'Detalhes do produto' }}>
-                {function telaDetalhes(props) { return <DetalhesProduto {...props} usuario={usuario} />; }}
+
+              <Stack.Screen
+                name="DetalhesAnimal"
+                options={{
+                  title: 'Conheça este pet',
+                }}
+              >
+                {(props) => (
+                  <DetalhesAnimal
+                    {...props}
+                    usuario={usuario}
+                  />
+                )}
               </Stack.Screen>
-              {/* O servidor protege os dados; esconder rotas apenas melhora a navegação. */}
-              {usuario.nivel === 'admin' && <Stack.Group>
-                <Stack.Screen name="CadastrarProduto" options={{ title: 'Cadastrar produto' }}>
-                  {function telaCadastrarProduto(props) { return <CadastrarProduto {...props} usuario={usuario} />; }}
+
+              <Stack.Screen
+                name="Perfil"
+                options={{
+                  title: 'Meu perfil',
+                }}
+              >
+                {(props) => (
+                  <Perfil
+                    {...props}
+                    usuario={usuario}
+                    sair={sair}
+                    atualizarUsuario={atualizarUsuario}
+                  />
+                )}
+              </Stack.Screen>
+
+              <Stack.Screen
+                name="Favoritos"
+                options={{
+                  title: 'Meus favoritos',
+                }}
+                component={Favoritos}
+              />
+
+              <Stack.Screen
+                name="MinhasSolicitacoes"
+                options={{
+                  title: 'Solicitações de adoção',
+                }}
+                component={MinhasSolicitacoes}
+              />
+
+              <Stack.Screen
+                name="SolicitarAdocao"
+                options={{
+                  title: 'Solicitar adoção',
+                }}
+                component={SolicitarAdocao}
+              />
+
+              {podeGerenciar && (
+                <Stack.Group>
+                  <Stack.Screen
+                    name="CadastrarAnimal"
+                    options={{
+                      title: 'Cadastrar animal',
+                    }}
+                  >
+                    {(props) => (
+                      <CadastrarAnimal
+                        {...props}
+                        usuario={usuario}
+                      />
+                    )}
+                  </Stack.Screen>
+
+                  <Stack.Screen
+                    name="EditarAnimal"
+                    options={{
+                      title: 'Editar animal',
+                    }}
+                  >
+                    {(props) => (
+                      <EditarAnimal
+                        {...props}
+                        usuario={usuario}
+                      />
+                    )}
+                  </Stack.Screen>
+                </Stack.Group>
+              )}
+
+              {ehAdmin && (
+                <Stack.Screen
+                  name="Usuarios"
+                  options={{
+                    title: 'Gerenciar usuários',
+                  }}
+                >
+                  {(props) => (
+                    <Usuarios
+                      {...props}
+                      usuario={usuario}
+                    />
+                  )}
                 </Stack.Screen>
-                <Stack.Screen name="EditarProduto" options={{ title: 'Editar produto' }}>
-                  {function telaEditarProduto(props) { return <EditarProduto {...props} usuario={usuario} />; }}
-                </Stack.Screen>
-                <Stack.Screen name="Usuarios" options={{ title: 'Gerenciar usuários' }}>
-                  {function telaUsuarios(props) { return <Usuarios {...props} usuario={usuario} />; }}
-                </Stack.Screen>
-              </Stack.Group>}
+              )}
             </Stack.Group>
           )}
         </Stack.Navigator>
@@ -3373,18 +10541,24 @@ export default function App() {
     );
   }
 
-  return <SafeAreaProvider><StatusBar style="dark" />{renderizarConteudo()}</SafeAreaProvider>;
+  return (
+    <SafeAreaProvider>
+      <StatusBar style="dark" />
+      {renderizarConteudo()}
+    </SafeAreaProvider>
+  );
 }
 ```
 
 
-### loja-jwt/app.json
+### petmatch/app.json
 
 ```json
+
 {
   "expo": {
-    "name": "LOJA JWT",
-    "slug": "loja-jwt",
+    "name": "PetMatch",
+    "slug": "petmatch",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -3394,7 +10568,7 @@ export default function App() {
     },
     "android": {
       "adaptiveIcon": {
-        "backgroundColor": "#E6F4FE",
+        "backgroundColor": "#FAF8F3",
         "foregroundImage": "./assets/android-icon-foreground.png",
         "backgroundImage": "./assets/android-icon-background.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
@@ -3408,7 +10582,7 @@ export default function App() {
 ```
 
 
-### loja-jwt/eslint.config.js
+### petmatch/eslint.config.js
 
 ```js
 // Configuração ESM: todo o código da aplicação continua em JavaScript.
@@ -3423,7 +10597,7 @@ export default [
 ```
 
 
-### loja-jwt/index.js
+### petmatch/index.js
 
 ```js
 import { registerRootComponent } from 'expo';
@@ -3435,7 +10609,7 @@ registerRootComponent(App);
 ```
 
 
-### loja-jwt/jsconfig.json
+### petmatch/jsconfig.json
 
 ```json
 {
@@ -3457,7 +10631,7 @@ registerRootComponent(App);
 ```
 
 
-### loja-jwt/LICENSE
+### petmatch/LICENSE
 
 ```text
 The MIT License (MIT)
@@ -3484,20 +10658,21 @@ SOFTWARE.
 ```
 
 
-### loja-jwt/package-lock.json
+### petmatch/package-lock.json
 
 ```json
 {
-  "name": "loja-jwt",
+  "name": "petmatch",
   "version": "1.0.0",
   "lockfileVersion": 3,
   "requires": true,
   "packages": {
     "": {
-      "name": "loja-jwt",
+      "name": "petmatch",
       "version": "1.0.0",
       "dependencies": {
         "@expo/metro-runtime": "~58.0.15",
+        "@expo/vector-icons": "^15.0.2",
         "@react-native-async-storage/async-storage": "2.2.0",
         "@react-navigation/native": "^7.5.1",
         "@react-navigation/native-stack": "^7.21.0",
@@ -5241,6 +12416,17 @@ SOFTWARE.
       "resolved": "https://registry.npmjs.org/@expo/sudo-prompt/-/sudo-prompt-9.3.2.tgz",
       "integrity": "sha512-HHQigo3rQWKMDzYDLkubN5WQOYXJJE2eNqIQC2axC2iO3mHdwnIR7FgZVvHWtBwAdzBgAP0ECp8KqS8TiMKvgw==",
       "license": "MIT"
+    },
+    "node_modules/@expo/vector-icons": {
+      "version": "15.1.1",
+      "resolved": "https://registry.npmjs.org/@expo/vector-icons/-/vector-icons-15.1.1.tgz",
+      "integrity": "sha512-Iu2VkcoI5vygbtYngm7jb4ifxElNVXQYdDrYkT7UCEIiKLeWnQY0wf2ZhHZ+Wro6Sc5TaumpKUOqDRpLi5rkvw==",
+      "license": "MIT",
+      "peerDependencies": {
+        "expo-font": ">=14.0.4",
+        "react": "*",
+        "react-native": "*"
+      }
     },
     "node_modules/@expo/xcpretty": {
       "version": "4.4.7",
@@ -8821,6 +16007,17 @@ SOFTWARE.
         }
       }
     },
+    "node_modules/expo-font": {
+      "version": "58.0.11",
+      "resolved": "https://registry.npmjs.org/expo-font/-/expo-font-58.0.11.tgz",
+      "integrity": "sha512-6r7s6xk2L2orvum+x+TY1fzEcMtuCBRQTLgC/Su2uLzNPpT4L+E+S4IAGy8ZIjeVvwk2j2pj+HiZ23O7eh1PGQ==",
+      "license": "MIT",
+      "peerDependencies": {
+        "expo": "*",
+        "react": "*",
+        "react-native": "*"
+      }
+    },
     "node_modules/expo-modules-autolinking": {
       "version": "58.0.15",
       "resolved": "https://registry.npmjs.org/expo-modules-autolinking/-/expo-modules-autolinking-58.0.15.tgz",
@@ -9230,17 +16427,6 @@ SOFTWARE.
       "license": "MIT",
       "peerDependencies": {
         "expo": "*",
-        "react-native": "*"
-      }
-    },
-    "node_modules/expo/node_modules/expo-font": {
-      "version": "58.0.10",
-      "resolved": "https://registry.npmjs.org/expo-font/-/expo-font-58.0.10.tgz",
-      "integrity": "sha512-13orvRCiXg3EuirjMznWTKwFzhKHvtHRkUdgbvolbkyA1+EAbYDpp7LJMnvDnbTFU/m8Kb5awvOiaGzPYQ/ojg==",
-      "license": "MIT",
-      "peerDependencies": {
-        "expo": "*",
-        "react": "*",
         "react-native": "*"
       }
     },
@@ -14839,16 +22025,18 @@ SOFTWARE.
 ```
 
 
-### loja-jwt/package.json
+### petmatch/package.json
 
 ```json
+
 {
-  "name": "loja-jwt",
+  "name": "petmatch",
   "version": "1.0.0",
   "main": "index.js",
   "type": "module",
   "dependencies": {
     "@expo/metro-runtime": "~58.0.15",
+    "@expo/vector-icons": "^15.0.2",
     "@react-native-async-storage/async-storage": "2.2.0",
     "@react-navigation/native": "^7.5.1",
     "@react-navigation/native-stack": "^7.21.0",
@@ -14895,7 +22083,7 @@ SOFTWARE.
 ```
 
 
-### loja-jwt/playwright.config.js
+### petmatch/playwright.config.js
 
 ```js
 import { defineConfig } from '@playwright/test';
@@ -14935,1174 +22123,221 @@ export default defineConfig({
 ```
 
 
-### loja-jwt/README.md
-
-````markdown
-# LOJA JWT
-
-Projeto didático para o 3º ano do Ensino Médio Técnico: uma loja simples usada para estudar **cadastro, login, hash de senha, JWT, autenticação e autorização**. O usuário consulta produtos; o administrador também cadastra, edita, exclui e gerencia níveis de usuários.
-
-O projeto reúne aplicativo, API e SQL na pasta `loja-jwt`. Os produtos são apresentados sem imagens. Pagamentos, carrinho, frete e checkout ficam fora do escopo da atividade.
-
-## 1. Estrutura completa
-
-```text
-loja-jwt/
-├── App.js
-├── index.js
-├── app.json
-├── package.json
-├── package-lock.json
-├── eslint.config.js
-├── jsconfig.json
-├── playwright.config.js
-├── .gitignore
-├── README.md
-├── VALIDACAO.md
-├── ENTREGA_COMPLETA.md
-├── AGENTS.md
-├── LICENSE
-├── assets/
-│   ├── android-icon-background.png
-│   ├── android-icon-foreground.png
-│   ├── android-icon-monochrome.png
-│   ├── favicon.png
-│   ├── icon.png
-│   └── splash-icon.png
-├── components/
-│   ├── FormularioProduto.js
-│   └── ui.js
-├── screens/
-│   ├── Login.js
-│   ├── CadastroUsuario.js
-│   ├── Home.js
-│   ├── Produtos.js
-│   ├── DetalhesProduto.js
-│   ├── CadastrarProduto.js
-│   ├── EditarProduto.js
-│   └── Usuarios.js
-├── services/
-│   └── api.js
-├── scripts/
-│   ├── gerar-entrega.js
-│   ├── testar-web.js
-│   └── testar-mysql.js
-├── tests/
-│   └── app.spec.js
-├── backend/
-│   ├── server.js
-│   ├── app.js
-│   ├── .env.example
-│   ├── config/
-│   │   └── ambiente.js
-│   ├── database/
-│   │   └── conexao.js
-│   ├── controllers/
-│   │   ├── authController.js
-│   │   ├── produtosController.js
-│   │   └── usuariosController.js
-│   ├── routes/
-│   │   ├── authRoutes.js
-│   │   ├── produtosRoutes.js
-│   │   └── usuariosRoutes.js
-│   ├── middlewares/
-│   │   ├── autenticarToken.js
-│   │   └── somenteAdmin.js
-│   ├── scripts/
-│   │   └── criarAdmin.js
-│   ├── utils/
-│   │   └── validacoes.js
-│   └── tests/
-│       ├── api.test.js
-│       └── mysql.integration.test.js
-└── database/
-    └── loja_jwt.sql
-```
-
-`backend/.env` será criado **localmente por quem configurar o projeto**. Ele não acompanha o material. `node_modules/`, `.expo/` e `dist/` são pastas geradas pelas ferramentas. `ENTREGA_COMPLETA.md` é a consolidação gerada com estrutura, comandos e conteúdo integral dos fontes; o próprio arquivo é excluído das entradas do gerador.
-
-Os ícones de `assets/` pertencem ao aplicativo criado pelo Expo; nenhum produto depende de imagem.
-
-## 2. Criação e instalação
-
-### Criar um projeto novo para acompanhar a construção em aula
-
-Execute na pasta que receberá `loja-jwt`:
-
-```bash
-npx create-expo-app@latest loja-jwt --template blank
-cd loja-jwt
-```
-
-O comando oficial foi executado para este projeto em **25/10/2026**. Antes da implementação, o `package.json` gerado indicou:
-
-| Componente | Versão do projeto criado |
-| --- | --- |
-| Expo | `~58.0.19` |
-| React | `19.3.0` |
-| React Native | `0.88.0` |
-| React Navigation Native | `^7.5.1` |
-| React Navigation Native Stack | `^7.21.0` |
-| Node usado na preparação | `22.20.0` |
-| npm usado na preparação | `10.9.3` |
-
-As versões de React e React Native do template foram preservadas. O SDK 58 exige Node a partir de `22.13.x`; utilize uma versão compatível. A criação e a relação entre versões estão documentadas em [create-expo-app](https://docs.expo.dev/more/create-expo/) e na [referência do SDK 58](https://docs.expo.dev/versions/v58.0.0/).
-
-Instale a navegação estável com Native Stack:
-
-```bash
-npm install @react-navigation/native
-npm install @react-navigation/native-stack
-npx expo install react-native-screens react-native-safe-area-context
-```
-
-O procedimento segue a [instalação oficial do React Navigation](https://reactnavigation.org/docs/getting-started/). Neste projeto a navegação começa em `App.js`, usando JavaScript e Native Stack.
-
-Instale o suporte web e o armazenamento do token:
-
-```bash
-npx expo install react-dom react-native-web @expo/metro-runtime
-npx expo install @react-native-async-storage/async-storage
-```
-
-Instale as dependências da API na **mesma raiz**:
-
-```bash
-npm install express mysql2 cors jsonwebtoken bcryptjs dotenv
-```
-
-As dependências nativas são resolvidas por `expo install`, que considera o SDK do projeto. Não é necessário instalar um `expo-cli` global.
-
-### Executar o projeto já entregue
-
-Se a pasta já contém os arquivos deste material, entre nela e instale as versões registradas no arquivo de lock:
-
-```bash
-cd loja-jwt
-npm ci
-```
-
-Não execute `create-expo-app` dentro do projeto pronto. O `package-lock.json` permite que a turma instale o mesmo conjunto de dependências.
-
-O `package.json` da raiz contém `"type": "module"`. O Node interpreta os arquivos do backend como ES Modules: os imports usam `import`/`export` e caminhos locais terminam em `.js`. O backend compartilha as dependências da raiz.
-
-## 3. Objetivo e conteúdos
-
-Os alunos já conhecem componentes, Props, State, efeitos, React Navigation, `fetch`, `async/await`, API REST e CRUD com Express/MySQL. A nova pergunta é: **quem pode executar cada operação?**
-
-| Conceito novo | Para que serve | Onde observar |
-| --- | --- | --- |
-| Cadastro | Criar uma conta comum | `CadastroUsuario.js` e `authController.js` |
-| Hash com bcrypt | Proteger a senha armazenada | Cadastro e script `criarAdmin.js` |
-| Login | Conferir as credenciais | `Login.js` e `authController.js` |
-| JWT | Representar uma autenticação durante um período | Login e `autenticarToken.js` |
-| Bearer Token | Transportar o token na requisição HTTP | `services/api.js` |
-| Middleware | Verificar a requisição antes do controller | `backend/middlewares/` |
-| Autenticação | Identificar quem está fazendo a requisição | `autenticarToken.js` |
-| Autorização | Decidir o que a pessoa pode fazer | `somenteAdmin.js` |
-| Sessão persistida | Reabrir o app sem repetir um login válido | `App.js` e AsyncStorage |
-| Níveis de acesso | Separar consulta e administração | `usuario` e `admin` |
-
-### Tecnologias
-
-O front-end utiliza React Native, Expo Blank, JavaScript, Native Stack, `useState`, `useEffect`, `useFocusEffect`, `fetch`, `FlatList`, `TextInput`, `Pressable`, `StyleSheet` e AsyncStorage.
-
-O backend utiliza Node.js, Express, `mysql2/promise`, CORS, `jsonwebtoken`, `bcryptjs`, `dotenv` e ES Modules. O banco é MySQL, administrado pelo MySQL Workbench.
-
-A organização mantém visível o caminho estudado em aula:
-
-```text
-screen → fetch → route → middleware → controller → MySQL
-```
-
-`components/ui.js` reúne pequenos elementos visuais reutilizados. `components/FormularioProduto.js` compartilha os campos das telas de cadastro e edição. `services/api.js` reúne a URL e o envio do token. `backend/app.js` monta o Express; `server.js` abre a porta. Essa separação também permite verificar as rotas nos testes sem iniciar a API de uso normal.
-
-## 4. Preparar o MySQL
-
-1. Inicie o serviço MySQL no computador.
-2. Abra o MySQL Workbench e conecte-se ao seu servidor local.
-3. Abra o arquivo `database/loja_jwt.sql` em uma aba SQL.
-4. Execute o arquivo completo.
-5. Atualize a lista de schemas e confira `loja_jwt`, `usuarios` e `produtos`.
-
-Verifique com:
-
-```sql
-USE loja_jwt;
-SHOW TABLES;
-SELECT id, nome, email, nivel, criado_em FROM usuarios;
-SELECT id, nome, categoria, preco, estoque FROM produtos;
-```
-
-São fornecidos seis produtos: notebook, mouse, teclado, monitor, headset e webcam. O SQL também inclui `INSERT` de duas contas demonstrativas, uma de cada nível:
-
-| Nível | E-mail | Senha de demonstração |
-| --- | --- | --- |
-| `usuario` | `usuario@loja.com` | `Usuario@123` |
-| `admin` | `admin@loja.com` | `Admin@123` |
-
-Depois de importar o SQL, configurar o `.env` e iniciar a API e o aplicativo, essas contas já podem fazer login. Não é necessário executar `criarAdmin.js` para usar o administrador demonstrativo. O cadastro pelo aplicativo continua disponível para criar outras contas comuns.
-
-Essas senhas são públicas e servem somente à aula; não use as contas demonstrativas com dados reais. A coluna `senha` recebe apenas hashes bcrypt com custo `10`, previamente gerados com `bcryptjs`; o SQL não armazena as senhas em texto puro.
-
-Os usuários são inseridos com `INSERT IGNORE`, sem informar IDs. Ao executar o SQL novamente, os e-mails existentes não são duplicados, e seus dados, senhas e níveis atuais são preservados. As credenciais da tabela acima funcionam somente para as contas que o SQL criou; se o e-mail já existia ou foi alterado depois, continuam valendo os dados anteriores.
-
-### Tabelas e tipos
-
-| Tabela | Colunas principais | Observação |
-| --- | --- | --- |
-| `usuarios` | `id`, `nome`, `email`, `senha`, `nivel`, `criado_em` | `senha` guarda somente o hash; `email` é `UNIQUE` |
-| `produtos` | `id`, `nome`, `descricao`, `categoria`, `preco`, `estoque`, `criado_em` | `preco` é `DECIMAL(10,2)`; `estoque` é inteiro |
-
-`nivel` aceita somente `usuario` ou `admin` e possui padrão `usuario`. O controller também fixa esse valor no cadastro público: a regra existe no servidor, além da restrição do banco.
-
-### Consultas parametrizadas
-
-Dados enviados pelo cliente não são concatenados ao texto SQL. O placeholder `?` recebe o valor separadamente:
-
-```js
-const [usuarios] = await pool.execute(
-  'SELECT id, nome, email, senha, nivel FROM usuarios WHERE email = ?',
-  [email]
-);
-```
-
-O login precisa ler o hash para executar `bcrypt.compare`. Essa leitura interna não autoriza devolver o hash ao cliente. A listagem administrativa seleciona explicitamente `id`, `nome`, `email`, `nivel` e `criado_em`.
-
-O pool de conexões está em `backend/database/conexao.js`. Ele permite ao MySQL2 gerenciar conexões para várias requisições. Veja [MySQL2: Promises e placeholders](https://sidorares.github.io/node-mysql2/docs).
-
-## 5. Configurar as variáveis de ambiente
-
-Copie o modelo para um arquivo local. No PowerShell, dentro de `loja-jwt`:
-
-```powershell
-Copy-Item -LiteralPath backend/.env.example -Destination backend/.env
-```
-
-Em um terminal Linux/macOS, a cópia equivalente é:
-
-```bash
-cp backend/.env.example backend/.env
-```
-
-Abra `backend/.env` no editor e preencha:
-
-| Variável | Significado |
-| --- | --- |
-| `JWT_SECRET` | Segredo forte que a API usa para assinar e verificar os tokens |
-| `PORT` | Porta HTTP opcional; padrão `3000` |
-| `DB_HOST` | Endereço do servidor MySQL, normalmente `localhost` |
-| `DB_PORT` | Porta MySQL opcional; padrão `3306` |
-| `DB_USER` | Usuário do MySQL com acesso ao banco |
-| `DB_PASSWORD` | Senha desse usuário do MySQL |
-| `DB_NAME` | Nome do schema, `loja_jwt` |
-| `ADMIN_NOME` | Nome de um administrador próprio, se usar o script opcional |
-| `ADMIN_EMAIL` | E-mail dessa conta; o modelo usa `admin.professor@loja.com` |
-| `ADMIN_SENHA` | Senha escolhida localmente para essa conta opcional |
-
-Os valores do modelo são instruções de preenchimento, não credenciais prontas. `DB_PASSWORD` pode ficar vazio somente quando a configuração local do seu MySQL realmente usa senha vazia.
-
-Para gerar um segredo aleatório no seu computador, execute:
-
-```bash
-node --input-type=module -e "import { randomBytes } from 'node:crypto'; process.stdout.write(randomBytes(48).toString('hex'));"
-```
-
-Copie o resultado para `JWT_SECRET`; a API exige no mínimo 32 caracteres. Se for criar um administrador próprio, escolha uma senha para `ADMIN_SENHA`, com pelo menos oito caracteres e até 72 bytes em UTF-8. As variáveis `ADMIN_*` são usadas somente pelo script opcional, sem alterar as contas demonstrativas do SQL. Não publique o segredo JWT nem suas credenciais próprias ou os coloque no front-end. O loader `backend/config/ambiente.js` lê `backend/.env` com `dotenv`.
-
-`backend/.env` está no `.gitignore`. O arquivo versionado é somente `backend/.env.example`. As senhas do banco e do administrador próprio permanecem na máquina que você configurar.
-
-## 6. Criar um administrador próprio (opcional)
-
-O administrador demonstrativo `admin@loja.com` já é criado pelo SQL. Para criar outra conta administrativa, configure `ADMIN_NOME`, `ADMIN_EMAIL` e `ADMIN_SENHA` no `.env`, usando um e-mail próprio ainda não cadastrado, e rode na raiz:
-
-```bash
-node backend/scripts/criarAdmin.js
-```
-
-Ou use o atalho:
-
-```bash
-npm run criar-admin
-```
-
-O fluxo é:
-
-```text
-backend/.env
-  ↓ ADMIN_NOME, ADMIN_EMAIL, ADMIN_SENHA
-validar os dados
-  ↓
-bcrypt.hash(senha, 10)
-  ↓
-INSERT em usuarios com nivel = admin
-  ↓
-Administrador criado com sucesso
-```
-
-Se a conta já existir, o script informa isso, não duplica o registro e não altera sua senha nem seu nível. Se a conta existente já for administradora, a mensagem será `Administrador já cadastrado`. Escolher `admin@loja.com` no `.env` não redefine a senha demonstrativa. O script não é um mecanismo público de promoção de usuários. Para contas existentes, um administrador autenticado usa a tela de gerenciamento de usuários.
-
-Tanto os `INSERT` demonstrativos do SQL quanto o script gravam somente hashes bcrypt. Após criar uma conta própria com o script, entre no aplicativo usando o e-mail e a senha que você escolheu no `.env`.
-
-## 7. Executar a API e o Expo
-
-Abra dois terminais na pasta `loja-jwt`.
-
-**Terminal 1 — API:**
-
-```bash
-node backend/server.js
-```
-
-Ou:
-
-```bash
-npm run api
-```
-
-Com a configuração e o banco disponíveis, a mensagem esperada é:
-
-```text
-API executando em http://localhost:3000
-```
-
-Abra `http://localhost:3000` no navegador para conferir a resposta pública de identificação da API. Esse endereço não é a tela do aplicativo. As consultas de produtos continuam exigindo token.
-
-Para reiniciar a API quando alterar arquivos do backend:
-
-```bash
-npm run api:dev
-```
-
-**Terminal 2 — aplicativo:**
-
-```bash
-npx expo start
-```
-
-Pressione `w` para abrir a versão web. Também é possível iniciar diretamente:
-
-```bash
-npm run web
-```
-
-### Android e iOS
-
-O código usa componentes e navegação compatíveis com as plataformas nativas. O Expo Go instalado precisa reconhecer o SDK deste projeto. Se aparecer incompatibilidade com SDK 58, utilize um Expo Go compatível, quando disponível para seu dispositivo, ou prepare uma development build. Mantenha as versões do projeto geradas pelo template.
-
-Uma development build é uma versão própria do aplicativo com ferramentas de desenvolvimento. O caminho local, com as ferramentas nativas já instaladas, é:
-
-```bash
-npx expo install expo-dev-client
-npx expo run:android
-```
-
-Para compilar iOS localmente, é necessário macOS com Xcode:
-
-```bash
-npx expo run:ios
-```
-
-Esses comandos são alternativas para preparar o ambiente nativo, não requisitos para estudar pela versão web. Consulte o [guia oficial de development builds](https://docs.expo.dev/develop/development-builds/introduction/) para a configuração da sua plataforma.
-
-## 8. localhost, IP local e conexão pelo celular
-
-A URL está centralizada em `services/api.js`:
-
-```js
-export const API = 'http://localhost:3000';
-```
-
-| Onde o app está executando | Endereço da API |
-| --- | --- |
-| Expo Web no mesmo computador da API | `http://localhost:3000` |
-| Celular físico na mesma rede do computador | `http://IP-DO-COMPUTADOR:3000` |
-| Emulador Android padrão do Android Studio | Geralmente `http://10.0.2.2:3000` |
-| Simulador iOS no mesmo Mac da API | Geralmente `http://localhost:3000` |
-
-No emulador Android, `10.0.2.2` é o alias para a interface de loopback do computador, conforme a [documentação de endereços de rede do Android Emulator](https://developer.android.com/studio/run/emulator-networking-address).
-
-No celular, `localhost` aponta para o próprio celular. Descubra o IPv4 do computador com `ipconfig` no Windows e use o endereço da conexão ativa. Um exemplo **apenas ilustrativo** seria:
-
-```js
-export const API = 'http://192.168.0.20:3000';
-```
-
-Não copie esse IP sem verificar o seu. O computador e o celular precisam alcançar a mesma rede; redes escolares podem bloquear comunicação entre dispositivos. Se necessário, permita o Node e a porta 3000 no firewall da rede local.
-
-O QR code do Expo conecta o celular ao servidor do aplicativo. A URL da API continua sendo a de `services/api.js`. O túnel do Expo para carregar o app não transforma automaticamente uma API local em uma API pública.
-
-## 9. Cadastro: criar uma conta comum
-
-**O que é:** criação de uma identidade no banco. **Para que serve:** permitir que cada pessoa faça login com suas credenciais. **Onde está:** `screens/CadastroUsuario.js`, rota pública `POST /auth/cadastro` e função do cadastro em `authController.js`.
-
-A tela recebe nome, e-mail, senha e confirmação de senha. A confirmação serve à interface e não precisa ser armazenada ou enviada à API. A tela verifica campos vazios, diferença entre as senhas e senha com menos de oito caracteres. O backend repete as validações porque requisições podem ser feitas fora do aplicativo.
-
-```text
-CadastroUsuario
-  ↓ nome, email, senha
-POST /auth/cadastro
-  ↓
-authController
-  ↓ validar e verificar e-mail duplicado
-bcrypt.hash(senha, 10)
-  ↓
-INSERT usuarios com nivel = usuario
-  ↓
-201 Created
-```
-
-E-mail duplicado produz `409 Conflict`. O campo `UNIQUE` também protege o banco se duas requisições tentarem inserir o mesmo e-mail ao mesmo tempo.
-
-A tela não oferece escolha de nível. Mesmo que alguém envie `"nivel": "admin"` no JSON, o controller ignora esse valor e grava `usuario`. A conta criada deve fazer login para receber um token.
-
-## 10. Hash de senha com bcrypt
-
-**O que é:** uma transformação de mão única usada para conferir senhas sem guardar o texto original no banco. **Para que serve:** evitar o armazenamento direto da senha. **Onde está:** cadastro, login e script de criação do administrador.
-
-No cadastro, a operação principal é:
-
-```js
-const senhaHash = await bcrypt.hash(senha, 10);
-```
-
-Somente `senhaHash` é salvo na coluna `usuarios.senha`. O número `10` configura o custo do bcrypt. O salt é gerado pela biblioteca; duas contas que escolham a mesma senha podem ter hashes diferentes.
-
-No login, a operação principal é:
-
-```js
-const senhaCorreta = await bcrypt.compare(senha, usuario.senha);
-```
-
-`compare` responde se a senha informada corresponde ao hash. O processo não precisa recuperar a senha original. A senha existe temporariamente durante o envio e a comparação; o aplicativo não a grava no AsyncStorage e a API não a imprime nem a devolve nas respostas.
-
-JWT não substitui bcrypt: **bcrypt protege a senha armazenada; JWT representa a autenticação nas próximas requisições**. A biblioteca possui um limite de 72 bytes de entrada; o backend rejeita senhas que ultrapassem esse limite para evitar truncamento silencioso. Caracteres acentuados podem ocupar mais de um byte. Veja a [documentação do bcryptjs](https://github.com/dcodeIO/bcrypt.js).
-
-## 11. Login e JWT
-
-**O que é login:** conferência de e-mail e senha. **Onde está:** `screens/Login.js`, função `realizarLogin`, e rota `POST /auth/login`.
-
-```text
-Login
-  ↓ email + senha
-POST /auth/login
-  ↓
-buscar usuário pelo e-mail
-  ↓
-bcrypt.compare()
-  ↓ senha correta
-jwt.sign()
-  ↓
-responder token + usuario
-  ↓
-AsyncStorage.setItem('token', token)
-  ↓
-App.js atualiza usuario
-  ↓
-Home
-```
-
-E-mail inexistente e senha incorreta recebem a mesma mensagem: `E-mail ou senha inválidos`. O aplicativo não precisa saber qual dos dois dados falhou.
-
-Uma resposta de login possui este formato; o token abaixo é apenas uma indicação do campo:
-
-```json
-{
-  "token": "TOKEN_RETORNADO_PELA_API",
-  "usuario": {
-    "id": 2,
-    "nome": "Aluno Exemplo",
-    "email": "aluno@example.com",
-    "nivel": "usuario"
-  }
-}
-```
-
-### O que é JWT?
-
-JWT é um formato de token. Aqui ele carrega informações mínimas sobre a autenticação e uma assinatura verificável pelo servidor. O login usa:
-
-```js
-const token = jwt.sign(
-  {
-    id: usuario.id,
-    email: usuario.email,
-    nivel: usuario.nivel,
-  },
-  process.env.JWT_SECRET,
-  { expiresIn: '2h' }
-);
-```
-
-| Parte | Significado no projeto |
-| --- | --- |
-| Payload | Dados `id`, `email` e `nivel` usados para identificar a autenticação |
-| Secret | Valor privado `JWT_SECRET`, conhecido somente pelo backend |
-| `expiresIn: '2h'` | Token válido por até duas horas após a emissão |
-| Assinatura | Permite verificar se o token foi emitido com o segredo esperado e se seu conteúdo foi alterado |
-
-`jsonwebtoken` também inclui os campos de tempo necessários, como `iat` e `exp`. O servidor usa `jwt.verify` para conferir assinatura e validade. Somente decodificar o payload não autentica ninguém. As operações estão descritas na [documentação de jsonwebtoken](https://github.com/auth0/node-jsonwebtoken).
-
-Um JWT assinado **não é uma senha criptografada**. Seu payload pode ser lido por quem tiver o token. Por isso, ele nunca inclui senha, hash ou informações sensíveis. Quem obtém um Bearer Token pode tentar usá-lo até sua expiração.
-
-O campo `nivel` do token registra o nível no momento do login. Para que promoções e rebaixamentos tenham efeito imediato, este projeto consulta o usuário atual no banco em cada requisição autenticada e usa o nível atual para autorizar a operação.
-
-## 12. Authorization e Bearer Token
-
-**O que é:** uma forma de enviar a credencial no cabeçalho HTTP. **Para que serve:** a API reconhecer a autenticação sem receber e-mail e senha a cada consulta. **Onde está:** `services/api.js`.
-
-O formato é:
-
-```http
-Authorization: Bearer TOKEN_RETORNADO_NO_LOGIN
-```
-
-`Authorization` é o nome do header. `Bearer` identifica o esquema de autenticação. Depois de um espaço vem o token completo, sem aspas extras.
-
-O helper `fetchAutenticado` lê o token no AsyncStorage e acrescenta o cabeçalho. Este exemplo completo mostra uma consulta feita fora de uma screen:
-
-```js
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import { API } from './services/api.js';
-
-async function consultarProdutos() {
-  const token = await AsyncStorage.getItem('token');
-  const resposta = await fetch(API + '/produtos', {
-    headers: {
-      Authorization: 'Bearer ' + token,
-    },
-  });
-
-  const dados = await resposta.json();
-
-  if (!resposta.ok) {
-    throw new Error(dados.mensagem || 'Não foi possível consultar os produtos');
-  }
-
-  return dados;
-}
-```
-
-Nas telas, o projeto usa `fetchAutenticado` para evitar repetir a busca do token. A função retorna o objeto `Response`; `lerResposta` lê o JSON e transforma respostas de erro em mensagens para a tela. `fetch` não lança erro automaticamente por receber `400`, `401` ou `403`: é necessário examinar o status ou `resposta.ok`.
-
-## 13. Middlewares: autenticação e autorização
-
-### autenticarToken
-
-**O que é:** função Express executada antes do controller. **Para que serve:** bloquear requisições sem autenticação válida. **Onde está:** `backend/middlewares/autenticarToken.js`.
-
-```text
-fetchAutenticado()
-  ↓
-Authorization: Bearer TOKEN
-  ↓
-autenticarToken(req, res, next)
-  ↓ conferir cabeçalho e esquema Bearer
-jwt.verify(token, JWT_SECRET)
-  ↓ conferir assinatura e expiração
-consultar usuário atual no MySQL
-  ↓
-req.usuario
-  ↓ next()
-controller
-```
-
-O middleware lê `req.headers.authorization`. Se faltar token, se o formato estiver incorreto, se a assinatura não conferir ou se o token tiver expirado, responde `401`. O controller protegido não é executado.
-
-`req.usuario` é uma propriedade definida pelo middleware no objeto da requisição. Ela disponibiliza a identidade autenticada para os próximos passos. O projeto também confere se a conta ainda existe e usa os dados atuais do banco para decidir permissões.
-
-`req.body` contém os dados enviados no corpo JSON; `req.params.id` contém o trecho variável do caminho, como o `5` de `/produtos/5`. Esses dados precisam de validação antes das consultas.
-
-### somenteAdmin
-
-**O que é:** middleware de autorização. **Para que serve:** permitir operações administrativas somente a quem possui nível `admin`. **Onde está:** `backend/middlewares/somenteAdmin.js`.
-
-```text
-POST /produtos
-  ↓
-autenticarToken
-  ↓ token válido e usuário atual identificado
-somenteAdmin
-  ↓ req.usuario.nivel === 'admin'?
-  ├── SIM → next() → controller → INSERT → 201
-  └── NÃO → 403 Forbidden
-```
-
-A ordem importa: primeiro identificar, depois autorizar. Um usuário comum com token perfeitamente válido pode receber `403` porque não tem a permissão necessária.
-
-### Diferença entre 401 e 403
-
-| Status | Pergunta respondida | Exemplo |
-| --- | --- | --- |
-| `401 Unauthorized` | Existe autenticação válida? | `GET /produtos` sem token; token expirado ou alterado |
-| `403 Forbidden` | A pessoa autenticada pode executar esta ação? | `POST /produtos` com token de usuário comum |
-
-**Esconder um botão no aplicativo não protege uma rota.** O cliente pode ser alterado e a API pode ser chamada por outras ferramentas. A autorização precisa acontecer no backend. O nível recebido ou guardado no front-end serve à apresentação da interface; o servidor decide a permissão.
-
-## 14. Rotas e matriz de permissões
-
-| Método e caminho | Público | `usuario` | `admin` | Resposta de sucesso |
-| --- | --- | --- | --- | --- |
-| `POST /auth/cadastro` | Sim | Sim | Sim | `201` — conta comum criada |
-| `POST /auth/login` | Sim | Sim | Sim | `200` — `{ token, usuario }` |
-| `GET /auth/me` | Não | Sim | Sim | `200` — dados básicos do usuário |
-| `GET /produtos` | Não | Sim | Sim | `200` — array de produtos |
-| `GET /produtos/:id` | Não | Sim | Sim | `200` — objeto do produto |
-| `POST /produtos` | Não | Não | Sim | `201` — `{ mensagem, produto }` |
-| `PUT /produtos/:id` | Não | Não | Sim | `200` — `{ mensagem, produto }` |
-| `DELETE /produtos/:id` | Não | Não | Sim | `200` — `{ mensagem }` |
-| `GET /usuarios` | Não | Não | Sim | `200` — array de usuários sem hash |
-| `PUT /usuarios/:id/nivel` | Não | Não | Sim | `200` — `{ mensagem, usuario }` |
-
-Nas rotas públicas, as colunas `usuario` e `admin` significam que a rota não exige autenticação; fazer um cadastro público continua criando uma conta comum.
-
-As rotas de produtos exigem `autenticarToken`. As alterações de produtos e todas as rotas de usuários acrescentam `somenteAdmin`.
-
-### Permissões para verificar na prática
-
-| Credencial | Requisição | Status esperado |
-| --- | --- | --- |
-| Sem token | `GET /produtos` | `401` |
-| Usuário comum | `GET /produtos` | `200` |
-| Usuário comum | `POST /produtos` | `403` |
-| Administrador | `POST /produtos` com dados válidos | `201` |
-| Usuário comum | `GET /usuarios` | `403` |
-| Administrador | `GET /usuarios` | `200` |
-
-## 15. Sessão, navegação e logout
-
-### App.js como responsável pela sessão
-
-`usuario` guarda os dados básicos da pessoa autenticada. `carregando` impede exibir o fluxo errado enquanto o aplicativo verifica o armazenamento. O token é o único dado de autenticação persistido no AsyncStorage.
-
-```text
-Aplicativo inicia
-  ↓ useEffect
-AsyncStorage.getItem('token')
-  ↓
-Existe token?
-  ├── NÃO → Login / CadastroUsuario
-  └── SIM → GET /auth/me com Authorization
-               ├── 200 → carregar usuario → Home
-               ├── 401 → remover token → Login
-               └── falha de rede → informar e permitir tentar novamente
-```
-
-A rota `/auth/me` responde somente `id`, `nome`, `email` e `nivel`. O aplicativo não confia apenas na existência de um texto chamado `token`; ele consulta a API para verificar a sessão.
-
-Falha de conexão e token inválido são situações diferentes: quando a API está temporariamente indisponível durante a restauração, o aplicativo preserva o token e oferece nova tentativa. Se a API retornar `401`, a sessão é encerrada e o aplicativo informa que é necessário entrar novamente.
-
-### Navegação por estado e nível
-
-| Estado | Telas disponíveis |
-| --- | --- |
-| Sem usuário autenticado | `Login`, `CadastroUsuario` |
-| Usuário comum autenticado | `Home`, `Produtos`, `DetalhesProduto` |
-| Administrador autenticado | Telas comuns, `CadastrarProduto`, `EditarProduto`, `Usuarios` |
-
-O Native Stack é montado conforme o estado da sessão. O login atualiza `usuario` e exibe o fluxo autenticado. O logout limpa o estado e o fluxo volta para Login.
-
-A Home mostra `Olá, NOME` e o nível atual. Para usuário comum, oferece **Ver produtos** e **Sair**. Para administrador, oferece também **Cadastrar produto** e **Gerenciar usuários**.
-
-Ao voltar para Home, a consulta de `/auth/me` atualiza o nível usado pela interface. Se um administrador promover ou rebaixar outra pessoa, o backend aplica a alteração já na próxima requisição dela, usando o banco. Não é necessário esperar um novo token para fazer a autorização correta.
-
-### Logout e expiração
-
-O logout executa a remoção local do token e limpa `usuario`:
-
-```js
-await AsyncStorage.removeItem('token');
-```
-
-O botão voltar não deve reabrir telas autenticadas depois disso. O token expira após duas horas; uma resposta `401` também remove a sessão local e apresenta o aviso.
-
-O logout deste projeto é local: ele **não revoga cópias de tokens já emitidos**. Uma cópia ainda pode ser aceita até expirar, desde que a conta exista e tenha a permissão atual. Não há refresh token, lista de revogação ou sessão armazenada em tabela.
-
-### Limite didático do AsyncStorage
-
-AsyncStorage persiste pares chave/valor e não fornece criptografia de dados. Aqui ele é usado para tornar visível o ciclo salvar → ler → enviar → remover token. Não é um cofre de credenciais. Essa característica está descrita na [documentação do AsyncStorage para SDK 58](https://docs.expo.dev/versions/v58.0.0/sdk/async-storage/).
-
-Em produção, use HTTPS e reavalie armazenamento seguro e estratégia de sessão conforme a plataforma; em dispositivos nativos, isso pode envolver armazenamento protegido pelo sistema operacional. A senha não deve ser persistida no aplicativo.
-
-## 16. CRUD protegido de produtos
-
-| Operação | Rota | Tela e comportamento |
-| --- | --- | --- |
-| CREATE | `POST /produtos` | `CadastrarProduto`: formulário administrativo |
-| READ | `GET /produtos` | `Produtos`: listagem com `FlatList` |
-| READ por ID | `GET /produtos/:id` | `DetalhesProduto`: recebe `route.params.id` |
-| UPDATE | `PUT /produtos/:id` | `EditarProduto`: carrega e preenche o produto antes de salvar |
-| DELETE | `DELETE /produtos/:id` | Ação Excluir na listagem, com confirmação |
-
-Campos: nome, descrição, categoria, preço e estoque. A listagem mostra nome, categoria, preço e estoque; os detalhes também mostram a descrição. O formulário valida os dados antes do envio e o backend valida novamente. Nome é obrigatório e aceita até 120 caracteres; descrição e categoria são opcionais, com limites de 500 e 100 caracteres. Preço é obrigatório, não negativo, com até duas casas decimais e máximo de `99999999.99`. Estoque é obrigatório, inteiro entre `0` e `2147483647`.
-
-A tela `EditarProduto` recebe o ID pela navegação e faz `GET` antes do `PUT`. A exclusão exige confirmação; depois do `DELETE`, a lista é atualizada. O retorno de telas de edição/cadastro também permite atualizar os dados da listagem.
-
-Para usuário comum, os controles Editar e Excluir não aparecem. Para administrador, eles aparecem. Mesmo que uma pessoa comum construa uma requisição manual de alteração, a API responde `403`.
-
-Exemplo completo de corpo para criação ou atualização:
-
-```json
-{
-  "nome": "Teclado de laboratório",
-  "descricao": "Teclado USB utilizado na atividade de CRUD protegido",
-  "categoria": "Periféricos",
-  "preco": 149.9,
-  "estoque": 12
-}
-```
-
-Os números JSON usam ponto decimal. Na tela, o valor é convertido antes do envio. IDs do caminho devem ser inteiros positivos; um ID válido que não exista produz `404`.
-
-## 17. Gerenciamento de usuários
-
-**O que é:** consulta de contas e alteração controlada de seus níveis. **Para que serve:** atribuir ou remover permissões administrativas. **Onde está:** `screens/Usuarios.js`, `usuariosRoutes.js` e `usuariosController.js`.
-
-`GET /usuarios` exige os dois middlewares e retorna nome, e-mail, nível e identificadores básicos, sem a coluna de senha. Na tela:
-
-- Uma conta `usuario` oferece **Tornar administrador**.
-- Uma conta `admin` oferece **Tornar usuário**.
-- A própria conta autenticada não oferece mudança de nível.
-
-Para promover, o administrador envia `PUT /usuarios/:id/nivel` com:
-
-```json
-{
-  "nivel": "admin"
-}
-```
-
-Para rebaixar:
-
-```json
-{
-  "nivel": "usuario"
-}
-```
-
-O servidor aceita somente esses dois valores. Se `Number(req.params.id)` corresponder a `Number(req.usuario.id)`, responde `400` e `Não é possível alterar o próprio nível`. A regra existe no servidor mesmo que alguém ignore o bloqueio visual.
-
-Após uma alteração, a lista é recarregada. A autorização seguinte da conta afetada considera seu nível atual no MySQL.
-
-## 18. Status HTTP e mensagens
-
-| Status | Significado nesta API | Exemplo |
-| --- | --- | --- |
-| `200 OK` | Consulta ou alteração concluída | Login, listar produtos, editar produto |
-| `201 Created` | Registro criado | Cadastro de conta ou produto |
-| `400 Bad Request` | Dados inválidos | Campos vazios, nível desconhecido, alterar o próprio nível |
-| `401 Unauthorized` | Autenticação ausente ou inválida | Senha incorreta no login, token ausente ou expirado |
-| `403 Forbidden` | Pessoa autenticada sem a permissão exigida | Usuário comum tentando cadastrar produto |
-| `404 Not Found` | Registro ou rota não encontrado | Produto excluído ou ID inexistente |
-| `409 Conflict` | E-mail já cadastrado | Repetir cadastro com o mesmo e-mail |
-| `500 Internal Server Error` | Falha interna inesperada | Erro ao executar uma consulta |
-
-As mensagens de erro seguem o formato `{ "mensagem": "Descrição do problema" }`. Senhas, hashes, segredos e detalhes internos do banco não devem ser expostos ao cliente.
-
-## 19. Testar com Postman e curl
-
-### Preparar o Postman
-
-Crie um ambiente local com `base_url = http://localhost:3000`, `email_usuario`, `senha_usuario`, `email_admin`, `senha_admin`, `token_usuario` e `token_admin`. Preencha as senhas somente no ambiente local da ferramenta, sem publicar ou exportar credenciais.
-
-Nas requisições com JSON, escolha **Body → raw → JSON**. Nos exemplos a seguir, `{{senha_usuario}}` é uma variável a preencher, não uma senha fornecida pelo material.
-
-**1. Criar conta comum — `POST {{base_url}}/auth/cadastro`:**
-
-```json
-{
-  "nome": "Aluno Exemplo",
-  "email": "{{email_usuario}}",
-  "senha": "{{senha_usuario}}",
-  "nivel": "admin"
-}
-```
-
-O campo adicional `nivel` permite demonstrar a tentativa de promoção indevida: o cadastro deve continuar com `nivel = usuario`. Na tela normal, esse campo não é enviado.
-
-**2. Fazer login comum — `POST {{base_url}}/auth/login`:**
-
-```json
-{
-  "email": "{{email_usuario}}",
-  "senha": "{{senha_usuario}}"
-}
-```
-
-Copie o campo `token` da resposta para `token_usuario`. Para o login administrativo, utilize as variáveis `email_admin` e `senha_admin`, configuradas com a conta demonstrativa do SQL ou com a conta própria criada pelo script, e salve o resultado em `token_admin`.
-
-**3. Conferir a sessão — `GET {{base_url}}/auth/me`:** escolha **Authorization → Bearer Token** e informe `{{token_usuario}}`. A ferramenta monta `Authorization: Bearer TOKEN`.
-
-**4. Consultar produtos — `GET {{base_url}}/produtos`:** use `token_usuario`; espere `200` e um array.
-
-**5. Tentar cadastrar produto com usuário comum — `POST {{base_url}}/produtos`:** envie o corpo de produto da seção anterior com `token_usuario`; espere `403`.
-
-**6. Repetir com `token_admin`:** espere `201`. Anote o ID retornado para consultar, editar e excluir o produto de teste.
-
-**7. Promover uma segunda conta — `PUT {{base_url}}/usuarios/ID-DA-SEGUNDA-CONTA/nivel`:** substitua o ID no caminho, use `token_admin` e envie `{ "nivel": "admin" }`. Não use o ID do próprio administrador.
-
-### Requisições simples com curl
-
-No Windows, use `curl.exe` para chamar o programa curl, evitando o alias existente em algumas versões do PowerShell:
-
-```powershell
-curl.exe -i http://localhost:3000/produtos
-```
-
-O resultado esperado é `401`. Para consultar autenticado, substitua o marcador pelo token completo copiado do login:
-
-```powershell
-curl.exe -i http://localhost:3000/produtos -H "Authorization: Bearer TOKEN_DO_USUARIO"
-curl.exe -i http://localhost:3000/auth/me -H "Authorization: Bearer TOKEN_DO_USUARIO"
-curl.exe -i http://localhost:3000/usuarios -H "Authorization: Bearer TOKEN_DO_USUARIO"
-curl.exe -i http://localhost:3000/usuarios -H "Authorization: Bearer TOKEN_DO_ADMIN"
-```
-
-Os status esperados, na ordem, são `200`, `200`, `403` e `200`, desde que os marcadores tenham sido substituídos por tokens válidos. Em Linux/macOS, utilize `curl` no lugar de `curl.exe`.
-
-Os exemplos não incluem senhas reais. Evite compartilhar tokens em capturas de tela, gravações de aula ou coleções exportadas.
-
-## 20. Testes recomendados
-
-Execute com um banco local preparado e, para os testes administrativos, com a conta demonstrativa do SQL ou uma conta própria criada pelo script. Use um e-mail novo no cenário de cadastro. Registre os resultados observados; esta lista descreve o comportamento esperado.
-
-| Nº | Ação | Resultado esperado |
-| --- | --- | --- |
-| 1 | Cadastrar usuário com dados válidos | `201`; conta com nível `usuario`; sem hash na resposta |
-| 2 | Repetir o mesmo e-mail | `409`; nenhuma conta duplicada |
-| 3 | Fazer login com senha errada | `401`; `E-mail ou senha inválidos` |
-| 4 | Fazer login correto | `200`; token salvo; Home mostra nome e nível |
-| 5 | Abrir produtos e detalhes como usuário | `200`; seis produtos iniciais e detalhes acessíveis |
-| 6 | Enviar `POST /produtos` manualmente com token comum | A requisição chega ao controle administrativo |
-| 7 | Conferir a resposta do teste anterior | `403`; produto não criado |
-| 8 | Fazer login com a conta administrativa | Home oferece cadastro de produto e usuários |
-| 9 | Cadastrar um produto válido | `201`; produto aparece na listagem |
-| 10 | Editar esse produto | `200`; novos dados aparecem nos detalhes |
-| 11 | Excluir esse produto e confirmar | `200`; lista atualizada; consulta posterior ao ID retorna `404` |
-| 12 | Listar usuários como admin | `200`; nome, e-mail e nível disponíveis, sem senha/hash |
-| 13 | Promover outra conta para admin | `200`; nível alterado; autorização seguinte usa o nível atual |
-| 14 | Fazer logout | Token removido; Login exibido; voltar não reabre Home |
-| 15 | Chamar `GET /produtos` sem Authorization | Nenhuma credencial é enviada |
-| 16 | Conferir a resposta do teste anterior | `401`; dados de produtos não são devolvidos |
-
-### Verificações complementares de segurança e sessão
-
-- Envie `nivel: admin` no cadastro público e confirme que a conta criada é `usuario`.
-- Tente alterar o próprio nível e confirme `400`.
-- Envie um nível diferente de `usuario`/`admin` e confirme `400`.
-- Tente IDs inválidos, preço negativo e estoque fracionado e confirme `400`.
-- Reabra o aplicativo com token válido: `/auth/me` deve manter a sessão.
-- Use um token alterado ou expirado: a API deve responder `401`; o app deve remover a sessão e avisar.
-- Interrompa a API antes de reabrir o aplicativo: a falha de rede deve permitir nova tentativa sem apagar um token que ainda pode ser válido.
-- Rebaixe outra conta administrativa: o token antigo dela não deve permitir a próxima operação administrativa.
-- Confira no MySQL que `usuarios.senha` contém hash bcrypt, nunca o texto digitado. Não projete senhas ou hashes em capturas compartilhadas.
-
-### Navegação a conferir
-
-```text
-Login → CadastroUsuario → Login
-Login correto → Home
-Home → Produtos → DetalhesProduto
-Admin → CadastrarProduto
-Admin → Produtos → EditarProduto
-Admin → Usuarios
-Logout → Login
-```
-
-### Verificações por comando
-
-```bash
-npm test
-npm run lint
-npm run typecheck
-npx expo install --check
-npm run export:web
-npm run test:web
-npm run test:mysql
-```
-
-`npm test` executa os testes Node das rotas e regras de acesso em `backend/tests/api.test.js`, sem exigir MySQL ou `.env`. HTTP, Express, JWT e bcrypt são reais; somente o pool do MySQL é substituído durante esses testes. A suíte cobre assinatura e expiração, bcrypt, cadastro forçando nível comum, `401`/`403`, CRUD, dados de usuários sem hash, alteração do próprio nível e efeito imediato do rebaixamento. A integração MySQL é ignorada na execução padrão e ativada pelo comando opcional descrito a seguir. A suíte padrão não executa o SQL em um servidor MySQL nem substitui os testes manuais do aplicativo.
-
-`npm run lint` analisa o JavaScript. `npm run typecheck` usa o verificador configurado em `jsconfig.json` para verificar o projeto JavaScript sem gerar arquivos; o projeto continua em `.js`, sem telas TypeScript.
-
-`expo install --check` confere dependências em relação ao SDK. A exportação web verifica o empacotamento do aplicativo e gera `dist/`; ela não inicia o MySQL nem faz login por você. A execução real da API, a importação do SQL e a navegação em cada dispositivo devem ser conferidas no ambiente da turma.
-
-### Navegador e MySQL real
-
-`npm run test:web` executa o wrapper `scripts/testar-web.js`, que inicia ou reutiliza o Expo e chama os testes de `tests/app.spec.js` com Playwright. Ao terminar, encerra somente o servidor que ele próprio iniciou. A configuração está em `playwright.config.js`. No Windows, ela usa Microsoft Edge por padrão; tenha esse navegador instalado. As respostas da API são simuladas para exercitar a interface, navegação, sessão e permissões visuais. Essa simulação não comprova a conexão com o MySQL nem substitui os testes de autorização do backend. O canal pode ser escolhido pela variável `PLAYWRIGHT_CHANNEL`; fora do Windows, o padrão é Chromium, que pode ser instalado com `npx playwright install chromium`.
-
-`npm run test:mysql` executa o teste opcional de integração por `scripts/testar-mysql.js`, com casos em `backend/tests/mysql.integration.test.js`. Ele exige o executável `mysqld` e prepara outra instância, com diretório de dados temporário e porta livres, para exercitar a API com MySQL real. O script não apaga nem reutiliza o banco de aula, arquivos de dados existentes, credenciais do `.env` ou o serviço MySQL já instalado.
-
-No Windows, o wrapper procura a instalação padrão em `C:\Program Files\MySQL\MySQL Server 8.0\bin\mysqld.exe`. Se a instalação estiver em outro local, defina o caminho real antes de executar:
-
-```powershell
-$env:MYSQLD_PATH = 'CAMINHO-COMPLETO-PARA-mysqld.exe'
-npm run test:mysql
-```
-
-Em outros sistemas, forneça `MYSQLD_PATH` com o executável correspondente. Os dados e logs dessa validação ficam em uma nova pasta dentro de `.mysql-validation`, ao lado de `loja-jwt`, para consulta. O teste encerra os processos temporários ao finalizar.
-
-### Gerar a entrega integral
-
-```bash
-npm run entrega
-```
-
-O comando executa `scripts/gerar-entrega.js` e atualiza `ENTREGA_COMPLETA.md` na raiz. O documento começa pela árvore real, apresenta os comandos de criação e execução e reproduz cada arquivo de texto completo, com caminho `loja-jwt/`. `package-lock.json` também é incluído. As imagens permanecem nos arquivos originais em `assets/` e são listadas na árvore.
-
-O gerador exclui o próprio resultado, `node_modules`, pastas de cache, relatórios de testes e credenciais locais. `backend/.env.example` é incluído como modelo público; arquivos `.env` e suas variantes locais não são lidos. Depois de alterar os fontes ou o README, execute novamente para atualizar a consolidação.
-
-### Resultados da preparação desta entrega
-
-Em 25/10/2026, passaram 14 testes da API, oito cenários no navegador e a integração isolada com MySQL real. Lint, análise do JavaScript, os 20 checks do Expo Doctor e os bundles web/Android/iOS também passaram. O relatório [VALIDACAO.md](VALIDACAO.md) explica o que foi exercitado, as simulações usadas, a ausência de teste em aparelho físico e os cinco avisos do `npm audit` na árvore de ferramentas do Expo. Nenhum downgrade foi aplicado.
-
-## 21. Possíveis erros e como investigar
-
-| Sintoma | Verificação e correção |
-| --- | --- |
-| Node abaixo da versão exigida | Atualize para uma versão que atenda ao SDK 58 e reinstale com `npm ci` |
-| `Cannot find package` | Execute `npm ci` na raiz `loja-jwt` |
-| Erro de import/export no Node | Confira `"type": "module"` no `package.json` e extensão `.js` nos imports locais |
-| Variável de ambiente ausente ou modelo não preenchido | Crie `backend/.env` a partir do exemplo e preencha os valores |
-| `ECONNREFUSED` ao conectar ao MySQL | Confira se o serviço MySQL está iniciado e se host/porta estão corretos |
-| `Access denied for user` | Confira `DB_USER`, `DB_PASSWORD` e as permissões no MySQL |
-| `Unknown database 'loja_jwt'` | Execute `database/loja_jwt.sql` na conexão correta do Workbench |
-| Tabela não encontrada | Confirme se o arquivo SQL completo foi executado e se `DB_NAME` aponta para o schema certo |
-| `EADDRINUSE` na porta 3000 | Outra API está usando a porta; encerre a instância antiga antes de iniciar esta |
-| `Failed to fetch` ou `Network request failed` | Confira API iniciada, URL em `services/api.js`, IP local, Wi-Fi e firewall |
-| Funciona na web, mas falha no celular | Troque `localhost` pelo IP alcançável do computador |
-| Token ausente ou expirado, resposta `401` | Faça login e envie o token completo com `Bearer` e espaço |
-| Token perdeu validade após mudar `JWT_SECRET` | Tokens assinados com o segredo anterior deixam de ser aceitos; faça novo login |
-| Usuário recebe `403` ao cadastrar produto | A autenticação existe; confira se o nível atual no banco é `admin` |
-| Cadastro recebe `409` | Esse e-mail já foi cadastrado; use a conta existente ou outro e-mail |
-| Alteração do próprio nível recebe `400` | A regra é intencional; outro administrador gerencia essa conta |
-| Campo de preço ou estoque recebe `400` | Confira número válido, preço não negativo e estoque inteiro |
-| Expo Go informa SDK incompatível | Confira a compatibilidade do Expo Go instalado ou use development build |
-| Web publicada por HTTPS não alcança API HTTP | Use API HTTPS para evitar bloqueio de conteúdo misto no navegador |
-
-Quando alterar arquivos JavaScript e a tela parecer antiga, confirme o terminal correto do Expo. Se necessário, reinicie com `npx expo start --clear`. Esse comando limpa o cache do empacotador; não apaga o banco.
-
-## 22. Ordem recomendada para explicar em aula
-
-O professor pode manter a estrutura pronta e construir as partes gradualmente, testando cada etapa antes de avançar.
-
-| Etapa | Conteúdo e arquivo principal | Demonstração sugerida |
-| --- | --- | --- |
-| 1 | Banco `usuarios`; `database/loja_jwt.sql` | Identificar `UNIQUE`, hash e nível padrão; revisar a tabela `produtos` |
-| 2 | Cadastro e bcrypt; `CadastroUsuario.js`, `authController.js` | Cadastrar, comparar texto digitado com o formato do hash sem expor a senha |
-| 3 | Login e `bcrypt.compare` | Mesmo resultado de erro para e-mail inexistente e senha incorreta |
-| 4 | JWT e `jwt.sign` | Relacionar payload mínimo, segredo e expiração de duas horas |
-| 5 | `autenticarToken` | Fazer uma consulta sem token, com token alterado e com token válido |
-| 6 | Bearer Token no React Native; `services/api.js` | Acompanhar AsyncStorage → header Authorization → API |
-| 7 | Níveis `usuario` e `admin`; Home | Comparar botões e explicar que o nível visual não autoriza a API |
-| 8 | `somenteAdmin` | Demonstrar `401` sem autenticação e `403` com usuário comum |
-| 9 | CRUD protegido de produtos | Reutilizar GET, POST, PUT e DELETE conhecidos, acrescentando os middlewares |
-| 10 | Administração de usuários | Promover/rebaixar outra conta e mostrar efeito na autorização seguinte |
-| 11 | Logout e sessão persistida; `App.js` | Reabrir com token válido, expirar sessão, interromper rede e remover token no logout |
-
-Perguntas para discussão: por que esconder o botão não basta? Por que a senha não pode ir no payload? Por que a API não confia em `req.body.nivel` no cadastro? O que muda entre um erro de rede e uma resposta `401`? Por que o nível deve ser conferido novamente depois de uma alteração no banco?
-
-## 23. Fluxo completo para revisar
-
-```text
-CADASTRO
-  ↓ nome + email + senha
-bcrypt.hash
-  ↓
-MySQL: hash + nivel usuario
-
-LOGIN
-  ↓ email + senha
-bcrypt.compare
-  ↓ senha correta
-JWT válido por duas horas
-  ↓
-AsyncStorage: token
-
-REQUISIÇÃO AUTENTICADA
-  ↓
-Authorization: Bearer TOKEN
-  ↓
-autenticarToken: assinatura + expiração + usuário atual
-  ↓
-req.usuario
-  ↓
-somenteAdmin, quando a ação exigir
-  ↓
-controller
-  ↓
-query parametrizada
-  ↓
-MySQL
-  ↓
-resposta HTTP sem senha ou hash
-  ↓
-State e interface atualizados
-```
-
-## 24. Comparação final: SEM JWT e COM JWT
-
-O primeiro desenho representa o CRUD sem a camada de autenticação estudada nesta unidade. O segundo mostra as verificações acrescentadas antes de acessar os dados:
-
-```text
-SEM JWT:
-
-Aplicativo
-  ↓
-API
-  ↓
-Banco
-
-COM JWT:
-
-Aplicativo
-  ↓
-Login
-  ↓
-Token
-  ↓
-Authorization
-  ↓
-Middleware
-  ↓
-Permissão
-  ↓
-Controller
-  ↓
-Banco
-```
-
-```text
-USUÁRIO
-  ↓
-consulta produtos
-
-ADMIN
-  ↓
-consulta
-  +
-cadastra
-  +
-edita
-  +
-exclui
-  +
-gerencia usuários
-```
-````
-
-
-### loja-jwt/VALIDACAO.md
+### petmatch/README.md
 
 ```markdown
-# Validação da LOJA JWT
+# PetMatch — Adoção de Animais
 
-Verificações executadas em 25/10/2026, com Node 22.20.0, npm 10.9.3 e Windows.
+##1 ENTREGA
 
-## Projeto e dependências
+## Apresentação do projeto
 
-O comando oficial `npx create-expo-app@latest loja-jwt --template blank` foi
-executado antes da implementação. Foram preservados Expo `~58.0.19`, React
-`19.3.0` e React Native `0.88.0`. React Navigation estável: Native `7.5.1` e
-Native Stack `7.21.0`. As dependências nativas foram instaladas com `expo install`.
+O PetMatch é um aplicativo desenvolvido com o objetivo de facilitar a adoção responsável de animais, conectando cães e gatos que precisam de um novo lar a pessoas interessadas em adotar.
 
-Todo o código da aplicação está em JavaScript. O backend é reconhecido pelo
-Node como ES Modules. Nenhum arquivo `.env` com credenciais foi criado ou entregue.
+A proposta é criar uma plataforma organizada e acessível, onde os usuários possam conhecer os animais disponíveis, visualizar suas informações, salvar favoritos e realizar solicitações de adoção. Além disso, o aplicativo busca auxiliar ONGs e protetores independentes na divulgação dos animais, tornando esse processo mais prático e centralizado.
 
-| Verificação | Resultado observado |
+## Problema identificado
+
+Atualmente, muitos animais aguardam por uma oportunidade de adoção, enquanto pessoas interessadas em adotar nem sempre sabem onde encontrar informações sobre eles.
+
+Grande parte das divulgações acontece por meio de redes sociais, grupos e publicações individuais, o que pode dificultar a organização das informações e o acompanhamento dos animais disponíveis.
+
+Outro problema é a dificuldade que ONGs e protetores independentes podem enfrentar para divulgar os animais e alcançar pessoas realmente interessadas na adoção.
+
+## Contexto e público afetado
+
+O projeto está relacionado à adoção de animais e à necessidade de melhorar a comunicação entre quem procura um pet e quem é responsável por sua divulgação.
+
+O público-alvo do PetMatch é formado por pessoas interessadas em adotar cães ou gatos, ONGs que trabalham com proteção animal e protetores independentes que resgatam, cuidam ou divulgam animais disponíveis para adoção.
+
+## Justificativa
+
+O PetMatch surgiu da ideia de utilizar a tecnologia para contribuir com uma causa importante: a adoção responsável de animais.
+
+A criação de uma plataforma específica para essa finalidade pode facilitar o acesso às informações, organizar os anúncios e aproximar os animais de possíveis adotantes.
+
+Além de ajudar quem deseja adotar, o projeto também busca oferecer mais visibilidade ao trabalho realizado por ONGs e protetores independentes.
+
+## Proposta de solução
+
+A solução proposta é desenvolver um aplicativo chamado PetMatch, no qual os usuários possam encontrar animais disponíveis para adoção e acompanhar suas solicitações.
+
+O aplicativo contará com um sistema de cadastro e login, listagem de animais, filtros de pesquisa, visualização de detalhes, favoritos e solicitações de adoção.
+
+Também haverá funcionalidades específicas para ONGs, protetores e administradores, permitindo o gerenciamento dos animais e das informações cadastradas.
+
+A proposta é reunir essas funcionalidades em um único ambiente, com uma interface simples, organizada e intuitiva.
+
+## Nome e identidade visual da aplicação
+
+O nome PetMatch representa a ideia de criar uma conexão entre animais e pessoas, ajudando cada pet a encontrar uma família.
+
+A identidade visual utiliza principalmente as cores laranja, verde e tons claros, além de uma patinha como símbolo da aplicação. O design foi pensado para transmitir uma imagem acolhedora, moderna e organizada, facilitando a navegação dos usuários.
+
+## Tipos de usuários e permissões
+
+O sistema foi planejado para atender quatro tipos de usuários: adotantes, ONGs, protetores independentes e administradores.
+
+Os **adotantes** poderão criar uma conta, realizar login, visualizar os animais disponíveis, pesquisar por características específicas, consultar informações detalhadas, adicionar animais aos favoritos, enviar solicitações de adoção e acompanhar seus pedidos.
+
+As **ONGs** terão acesso às funcionalidades gerais do aplicativo e também poderão cadastrar animais disponíveis para adoção, atualizar suas informações, gerenciar os anúncios sob sua responsabilidade e acompanhar solicitações relacionadas a esses animais.
+
+Os **protetores independentes** terão permissões semelhantes às das ONGs, podendo divulgar animais, manter seus cadastros atualizados e acompanhar o interesse de possíveis adotantes.
+
+O **administrador** será responsável pelo gerenciamento geral da plataforma, podendo acessar as funcionalidades do aplicativo, administrar os cadastros de animais, consultar usuários e gerenciar os níveis de acesso autorizados.
+
+O cadastro público será destinado aos adotantes, enquanto os demais níveis de acesso dependerão de autorização administrativa.
+
+## Principais funcionalidades
+
+O PetMatch contará com funcionalidades de cadastro e autenticação de usuários, permitindo que cada pessoa tenha sua própria conta e acesse as informações relacionadas ao seu perfil.
+
+A plataforma apresentará uma listagem de cães e gatos disponíveis para adoção, com ferramentas de pesquisa e filtros para facilitar a busca. Cada animal terá uma página de detalhes, onde o usuário poderá consultar suas informações.
+
+Também será possível adicionar animais aos favoritos e realizar solicitações de adoção, acompanhando posteriormente o andamento desses pedidos.
+
+Para ONGs, protetores e administradores, o aplicativo disponibilizará recursos de gerenciamento dos animais cadastrados, incluindo operações de criação, consulta, atualização e exclusão, conforme as permissões de cada perfil.
+
+## Telas previstas
+
+O aplicativo foi estruturado com 12 telas principais, responsáveis pelas diferentes funcionalidades do sistema.
+
+As telas de **Login** e **Cadastro de Usuário** permitem o acesso e a criação de contas. A **Home** apresenta o PetMatch e direciona os usuários para as principais funcionalidades. A tela **Animais** reúne os pets disponíveis, enquanto **Detalhes do Animal** apresenta as informações individuais de cada um.
+
+A tela **Favoritos** permite consultar os animais salvos, e **Solicitar Adoção** possibilita iniciar um pedido de adoção. Em **Minhas Solicitações**, o usuário poderá acompanhar os pedidos realizados.
+
+A tela **Perfil** reúne as informações da conta. Já **Cadastrar Animal** e **Editar Animal** são destinadas ao gerenciamento dos anúncios, enquanto a tela **Usuários** permite realizar funções administrativas relacionadas às contas e permissões.
+
+O aplicativo também prevê seções informativas de Sobre e Contato.
+
+## Fluxo inicial de navegação
+
+O fluxo principal do PetMatch começa na tela de Login, onde o usuário pode acessar uma conta existente ou escolher a opção de cadastro.
+
+Após realizar o cadastro e a autenticação, ele é direcionado para a Home, onde encontra uma apresentação do projeto e pode acessar a listagem de animais disponíveis para adoção.
+
+Ao selecionar um animal, o usuário poderá visualizar seus detalhes, adicioná-lo aos favoritos ou iniciar uma solicitação de adoção. Também será possível acessar o perfil e acompanhar as solicitações realizadas.
+
+Os usuários com permissões de ONG, protetor ou administrador terão acesso às funcionalidades adicionais de gerenciamento, de acordo com seu nível de acesso.
+
+## Tecnologias utilizadas
+
+O projeto utiliza **React Native** e **Expo** para o desenvolvimento e a execução do aplicativo, com **JavaScript** como linguagem de programação.
+
+A navegação entre as telas é realizada por meio do **React Navigation**, enquanto o backend utiliza **Node.js** e **Express** para desenvolver a API responsável pela comunicação entre o aplicativo e o banco de dados.
+
+O **MySQL** é utilizado para armazenar as informações de usuários, animais, favoritos e solicitações de adoção. A autenticação utiliza **JWT**, permitindo controlar o acesso às funcionalidades conforme o perfil de cada usuário.
+
+O desenvolvimento também utiliza **Git e GitHub** para o versionamento e armazenamento do código-fonte.
+
+## Estrutura do projeto
+
+O código do PetMatch está organizado em diferentes pastas para facilitar o desenvolvimento e a manutenção.
+
+A pasta **screens** contém as telas do aplicativo, enquanto **components** reúne os componentes reutilizáveis da interface. A pasta **services** é responsável pelos serviços de comunicação com a API, e **backend** contém os arquivos do servidor, incluindo rotas, controladores e configurações.
+
+A pasta **database** reúne arquivos relacionados ao banco de dados, enquanto **assets** armazena imagens e outros recursos visuais. O projeto também possui arquivos e pastas destinados aos testes e às configurações gerais da aplicação.
+
+O arquivo **App.js** é responsável pela navegação principal e pelo fluxo de autenticação, enquanto **package.json** reúne as dependências e os comandos necessários para executar o projeto.
+
+## Banco de dados
+
+O PetMatch utiliza um banco de dados MySQL para armazenar as informações necessárias ao funcionamento da plataforma.
+
+A estrutura contempla dados de usuários, animais disponíveis para adoção, favoritos e solicitações de adoção.
+
+Essas informações são acessadas por meio de uma API desenvolvida com Node.js e Express, permitindo que o aplicativo consulte, cadastre, atualize e exclua registros conforme as permissões estabelecidas.
+
+## Desenvolvimento e próximas etapas
+
+O PetMatch está em desenvolvimento e será aprimorado ao longo das próximas entregas.
+
+As próximas etapas incluem a revisão da integração entre o aplicativo, a API e o banco de dados, a validação das funcionalidades de cadastro e autenticação, os testes das operações CRUD e o aperfeiçoamento da interface.
+
+Também serão revisados os arquivos herdados do projeto-base utilizado em aula, garantindo que toda a documentação, as configurações e os testes estejam de acordo com a proposta do PetMatch.
+
+O objetivo final é entregar uma aplicação funcional, organizada e coerente com o planejamento apresentado.
+## Estado técnico após a revisão de 05/11/2026
+
+O planejamento acima foi preservado. O código atual usa exclusivamente as rotas `/auth`, `/animais`, `/usuarios`, `/favoritos` e `/adocoes`. Os níveis são `adotante`, `ong`, `protetor` e `admin`; o cadastro público sempre cria um adotante. A origem didática é o projeto Loja JWT fornecido pelo professor, mas as funcionalidades atuais são de adoção.
+
+Na pasta que contém `package.json`, use `npm ci` se precisar instalar as dependências já declaradas. Execute `npm run api` em um terminal e `npm run web` em outro. No PowerShell com bloqueio de scripts, use `npm.cmd` no lugar de `npm`. Nenhuma dependência nova foi necessária nesta revisão.
+
+A API lê a configuração existente em `backend/.env` e usa as variáveis `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD`, `DB_NAME`, `PORT` e `JWT_SECRET`. O esquema entregue chama-se `petmatch_db`. Nenhuma configuração ou credencial local foi alterada. Para celular físico, confira o endereço da API em `services/api.js`: localhost aponta para o próprio dispositivo.
+
+O arquivo `database/petmatch.sql` contém a estrutura para um banco novo e não cria contas demonstrativas. `CREATE TABLE IF NOT EXISTS` não atualiza tabelas existentes: qualquer migração de um banco já preenchido deve ser planejada separadamente. Esta revisão não aplicou SQL no banco real.
+
+As verificações e suas limitações estão em [VALIDACAO.md](VALIDACAO.md). `npm test` usa MySQL simulado; `npm run test:web` usa API simulada no navegador; `npm run test:mysql` cria um servidor MySQL descartável separado e importa o SQL entregue. Este último exige o binário local `mysqld` (ou `MYSQLD_PATH` apontando para ele).
+```
+
+
+### petmatch/VALIDACAO.md
+
+```markdown
+# Validação do PetMatch
+
+Revisão realizada em 05/11/2026.
+
+## Escopo e preservação
+
+Foram inventariados os arquivos próprios do projeto: configurações, App.js, 12 telas, componentes, serviço HTTP, API, middlewares, rotas, controllers, SQL, testes, scripts, documentação e seis imagens de assets. As imagens foram inspecionadas e ainda são recursos genéricos do template Expo, sem marca da loja; foram preservadas para não mudar o design.
+
+A busca de legado abrangeu nomes de arquivos e conteúdo, incluindo arquivos ocultos de configuração. Dependências instaladas, metadados Git, caches, resultados gerados e arquivos binários do MySQL temporário não são código autoral e não foram editados. Arquivos .env e credenciais locais não foram alterados nem reproduzidos. Alterações locais já existentes foram preservadas. O banco real não foi acessado ou modificado.
+
+## Referências corrigidas
+
+- AGENTS.md: título PetMatch, cadastro público como adotante e identificação de animais na navegação.
+- backend/controllers/produtosController.js: removido após confirmar que nenhuma rota ou importação executável o utilizava. A API já montava somente as rotas de animais.
+- backend/utils/validacoes.js: removida apenas validarProduto, utilizada exclusivamente pelo controller obsoleto. Validações de usuário e ID foram mantidas; animais já têm validação própria.
+- backend/tests/api.test.js: catálogo e CRUD passaram a testar animais; nível comum passou de usuario para adotante; mock SQL aceita consultas em várias linhas e os campos reais do animal. Mantidas verificações de JWT, bcrypt, cadastro, administração e revogação de privilégios.
+- tests/app.spec.js: mocks e cenários foram adaptados às telas atuais, ao cadastro com login automático, às rotas de animais, às mensagens e permissões atuais. Seletores respeitam elementos visíveis porque a navegação mantém telas montadas.
+- scripts/gerar-entrega.js e ENTREGA_COMPLETA.md: identidade PetMatch, SQL correto, remoção das instruções de contas demonstrativas antigas e da cópia de um .env.example inexistente. A entrega foi regenerada a partir dos fontes atuais.
+- README.md: acrescentado estado técnico atual sem apagar o planejamento original.
+
+app.json, package.json e os dois nomes raiz do package-lock.json já estavam adaptados para PetMatch na cópia de trabalho; foram conferidos e preservados. A substituição de database/loja_jwt.sql por database/petmatch.sql já estava em andamento antes da revisão.
+
+## Compatibilidade do SQL
+
+O SQL entregue tinha divergências reais com a implementação: idade textual, imagem em vez de foto, ausência de unidade_idade, saude e mensagem da adoção, além de sexo incompatível com Fêmea. O arquivo agora representa os campos e valores usados pelo frontend e pelos controllers, com responsável obrigatório para animais. Colunas opcionais de adoção já existentes (tipo_moradia, possui_outros_animais, observacoes) foram preservadas.
+
+O teste MySQL deixou de criar um esquema paralelo embutido e agora importa database/petmatch.sql exclusivamente em uma instância temporária, com diretório próprio e porta diferente de 3306. Isso valida o SQL que acompanha a entrega. Não foi criada ou executada migração do banco real. CREATE TABLE IF NOT EXISTS não corrige tabelas existentes.
+
+As rotas foram cruzadas com as chamadas do frontend: atualização de adoção usa PUT /adocoes/:id/status e cancelamento usa PUT /adocoes/:id/cancelar. A falha 404 versus 403 encontrada na integração vinha do teste, que usava /adocoes/:id; o teste foi corrigido sem mudar a API.
+
+## Resultados executados
+
+| Verificação | Resultado |
 | --- | --- |
-| `npm test` | 14 testes passaram; 1 integração opcional ignorada na execução padrão |
-| `npm run test:mysql` | Integração com MySQL 8.0.43 real passou |
-| `npm run test:web` | 8 cenários passaram no Microsoft Edge headless |
-| `npm run lint` | Sem erros ou avisos |
-| `npm run typecheck` | Análise dos arquivos JavaScript do frontend passou, sem gerar arquivos |
-| `npx expo-doctor` | 20 de 20 verificações aprovadas |
-| `npx expo install --check` | Dependências compatíveis com o SDK |
-| `npm run export:web` | Bundle web gerado com sucesso |
-| `npx expo export --platform android --platform ios --output-dir dist/native` | Bundles Android e iOS gerados com sucesso |
+| Análise de sintaxe (Babel parser e JSON.parse) | 43 arquivos JavaScript e 4 JSON válidos |
+| npm.cmd test | 14 testes de API passaram; integração MySQL ignorada por padrão (executada separadamente abaixo) |
+| npm.cmd run test:mysql | 1 cenário integrado passou usando o SQL entregue e MySQL descartável |
+| npm.cmd run test:web | 7 cenários passaram no Edge com Expo Web real e API simulada |
+| ESLint nos fontes (comando abaixo) | Falhou: 3 erros e 5 avisos em código de interface já existente |
+| npm.cmd run typecheck | Falhou: 8 erros em propriedades e tipos da interface já existente |
 
-## API, autenticação e banco
+Comando de lint concluído: `npm.cmd run lint -- App.js index.js components screens services backend scripts tests playwright.config.js eslint.config.js`. A tentativa sem caminhos explícitos não concluiu e foi interrompida; a execução com caminhos cobriu os fontes e configurações JavaScript. Não se considera lint aprovado.
 
-Os testes padrão usam HTTP, Express, JWT e bcrypt reais; somente o pool MySQL
-é simulado. Cobrem token ausente, inválido, expirado ou com algoritmo diferente,
-cadastro público ignorando `nivel: admin`, bcrypt com custo 10, e-mail duplicado,
-login sem revelar qual credencial está errada, validação de dados, CRUD,
-proibição de mudar o próprio nível e rebaixamento com efeito imediato.
+O ambiente inicialmente bloqueou processos com spawn EPERM. Os testes foram repetidos com autorização fora dessa restrição. O PowerShell bloqueou npm.ps1; npm.cmd funcionou sem alterar a política de execução.
 
-O teste opcional iniciou outro `mysqld` com `--no-defaults`, dados próprios,
-endereço `127.0.0.1` e porta `33307`. O serviço e os bancos preexistentes não
-foram usados. A API iniciou com `backend/server.js` e configurações geradas
-somente na memória dos processos de teste, sem criar `backend/.env`.
+A integração validou os quatro perfis, cadastro público sem elevação de privilégio, login/JWT, consulta de perfil, administração, criação e atualização de animais por ONG, bloqueio de alteração/exclusão por outro responsável, criação/exclusão por protetor, favoritos e duplicidade, solicitação de adoção, bloqueio de avaliação por outro responsável e aprovação que marca o animal como adotado. Os relatórios locais ficam em ../.mysql-validation/petmatch-*/resultado.txt.
 
-Foram confirmados no MySQL real:
+Os testes web validaram cadastro com login automático sem enviar nível, listagem/detalhes para adotante com Bearer, ausência de controles de gerenciamento para adotante, restauração/logout, sessão inválida, recuperação após falha de rede, 401 em sessão ativa e acesso administrativo. As duas falhas iniciais eram ambiguidades nos seletores dos testes; foram corrigidas e a suíte foi repetida com sucesso. Estes cenários não constituem validação completa de todos os fluxos visuais.
 
-- Importação do SQL duas vezes, mantendo seis produtos sem duplicação.
-- Script do administrador: criação e segunda execução sem duplicar a conta.
-- Cadastro sempre como `usuario`, duplicidade `409` e login incorreto `401`.
-- Login correto, JWT de duas horas e `/auth/me` sem senha ou hash.
-- Senhas armazenadas como hashes, diferentes dos valores de entrada.
-- CRUD administrativo completo, inclusive atualização sem mudanças e consulta após exclusão.
-- Listagem de usuários sem hash, promoção e rebaixamento de outra conta.
-- Próprio nível e nível inválido rejeitados com `400`.
-- Encerramento dos processos temporários da API e do MySQL ao final.
+## Problemas de implementação ainda presentes
 
-| Requisição | Perfil | Status observado |
-| --- | --- | --- |
-| `GET /produtos` | Sem token | `401` |
-| `GET /produtos` | Usuário | `200` |
-| `POST /produtos` | Usuário | `403` |
-| `POST /produtos` | Admin | `201` |
-| `GET /usuarios` | Usuário | `403` |
-| `GET /usuarios` | Admin | `200` |
+São problemas estáticos da interface atual, sem relação com a antiga loja, e não foram alterados para preservar o escopo e o comportamento solicitado:
 
-## Atualização: usuários demonstrativos no SQL
+- App.js:94: react-hooks/set-state-in-effect ao chamar restaurarSessao dentro do efeito.
+- screens/Animais.js:332: duas aspas literais em JSX violam react/no-unescaped-entities.
+- Avisos de lint: dependências de useCallback em DetalhesAnimal.js:88 e EditarAnimal.js:114; imports não utilizados em Home.js:6 e Login.js:5; variável capturada não utilizada em Perfil.js:83.
+- App.js:249: Perfil recebe usuario/sair/atualizarUsuario, mas sua assinatura declara somente navigation (1 erro do verificador).
+- Home.js:329,335,340,346,354: parâmetros ativo/icone de BotaoMenu inferidos como obrigatórios, mas omitidos em chamadas (5 erros).
+- Home.js:737,857: nomes de ícones inferidos como string ampla, incompatível com o conjunto de nomes de Ionicons (2 erros).
 
-Foram adicionados `INSERT` para `usuario@loja.com` (nível `usuario`) e
-`admin@loja.com` (nível `admin`). As senhas de demonstração estão no README;
-o SQL armazena apenas os hashes bcrypt com custo 10.
+Portanto, testes executáveis passaram, mas a validação estática global permanece reprovada. Não foi testado dispositivo físico Android/iOS nem realizado build nativo. Nenhuma dependência nova foi instalada.
 
-A integração com MySQL real foi executada novamente e passou, confirmando:
+## Histórico preservado
 
-- Login e `/auth/me` de ambas as contas com seus níveis corretos.
-- Usuário comum consulta produtos, mas recebe `403` nas operações administrativas.
-- Administrador cadastra/exclui produtos e lista usuários.
-- Reimportar o SQL não duplica contas nem sobrescreve ID, nome, senha ou nível existentes.
-- Os cenários anteriores de autenticação, administração e CRUD continuam passando.
-
-Lint e análise do JavaScript passaram novamente; os 14 testes padrão da API
-também passaram. Os resultados anteriores de navegador e bundles acima se
-referem à implementação da interface, que não foi alterada nesta atualização.
-
-## Interface e sessão
-
-Os oito testes Playwright executam o Expo Web real e simulam somente as
-respostas HTTP da API. Verificam cadastro, login incorreto e correto, Bearer
-nas consultas, ausência de senha no armazenamento, navegação por nível,
-restauração por `/auth/me`, logout, `401` durante a restauração e durante o uso,
-falha de rede preservando o token, CRUD com confirmação/cancelamento da exclusão
-e alteração dos níveis de outras contas.
-
-As telas de login, Home e catálogo foram inspecionadas em 390 × 844 e
-1280 × 900. Não houve overflow horizontal nem erro JavaScript de página.
-Os previews locais ficam em `dist/previews/` e usam dados fictícios.
-
-## Limites observados
-
-Os bundles nativos foram gerados, mas não houve execução em aparelho físico,
-emulador Android ou simulador iOS. Essa etapa deve ser feita no ambiente da
-turma, com a URL da API e a versão do cliente Expo compatíveis.
-
-O `npm audit` reportou cinco ocorrências de severidade alta na árvore de
-ferramentas do Expo: `expo`, `@expo/cli`, `@expo/code-signing-certificates`,
-`node-forge` e `zod`. Há duas dependências subjacentes envolvidas. A sugestão
-automática incluía trocar o Expo por uma versão antiga; isso não foi aplicado,
-preservando o SDK solicitado. Não foram forçadas versões incompatíveis.
-Os avisos precisam ser reavaliados quando o Expo publicar correções compatíveis.
-
-Para uso normal, configure seu próprio `backend/.env` e importe o SQL. A versão
-atual do SQL cria uma conta demonstrativa de cada nível, com hashes bcrypt e
-credenciais públicas documentadas no README. O script de administrador é opcional
-para criar uma conta própria. Os testes isolados não configuram o banco de aula
-nem deixam contas no serviço local preexistente.
+Loja JWT é a origem didática fornecida pelo professor. Menções explicativas em README.md e neste relatório foram mantidas; resultados antigos da loja não são evidência de aprovação do PetMatch. Termos genéricos corretos, como usuário, autenticarToken, cartão e imagem, não foram renomeados por semelhança textual. A licença original Expo foi preservada.
 ```
 

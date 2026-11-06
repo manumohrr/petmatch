@@ -10,10 +10,12 @@ process.env.JWT_SECRET = randomBytes(48).toString('hex');
 const { default: app } = await import('../app.js');
 const { default: pool } = await import('../database/conexao.js');
 
+const dadosAnimal = { nome: 'Luna', especie: 'Gato', raca: 'SRD', idade: 2, unidade_idade: 'anos', porte: 'Pequeno', sexo: 'Fêmea', cidade: 'Porto Alegre', descricao: 'Animal para adoção', saude: 'Vacinada', foto: '', status: 'disponivel' };
+
 let servidor;
 let base;
 let usuarios;
-let produtos;
+let animais;
 let senhaTeste;
 let senhaHash;
 let executarOriginal;
@@ -32,11 +34,11 @@ before(async function prepararServidor() {
 
 beforeEach(function reiniciarDados() {
   usuarios = [
-    { id: 1, nome: 'Estudante', email: 'estudante@example.test', senha: senhaHash, nivel: 'usuario' },
+    { id: 1, nome: 'Estudante', email: 'estudante@example.test', senha: senhaHash, nivel: 'adotante' },
     { id: 2, nome: 'Administrador', email: 'admin@example.test', senha: senhaHash, nivel: 'admin' },
     { id: 3, nome: 'Outra administradora', email: 'outra@example.test', senha: senhaHash, nivel: 'admin' },
   ];
-  produtos = [{ id: 1, nome: 'Mouse', descricao: 'Mouse USB', categoria: 'Periféricos', preco: 49.90, estoque: 8 }];
+  animais = [{ id: 1, usuario_id: 2, ...dadosAnimal, nome: 'Luna' }];
   chamadas = [];
 });
 
@@ -51,6 +53,7 @@ after(async function encerrarServidor() {
 
 // Mock pequeno dos resultados usados pelos controllers. Não tenta implementar um servidor SQL.
 async function executarEmMemoria(sql, parametros = []) {
+  sql = sql.replace(/\s+/g, ' ').trim();
   chamadas.push({ sql, parametros });
   if (sql.startsWith('SELECT') && sql.includes('FROM usuarios')) {
     let encontrados = usuarios;
@@ -74,25 +77,25 @@ async function executarEmMemoria(sql, parametros = []) {
     if (usuario) usuario.nivel = parametros[0];
     return [{ affectedRows: usuario ? 1 : 0 }];
   }
-  if (sql.startsWith('SELECT') && sql.includes('FROM produtos')) {
-    const encontrados = sql.includes('WHERE id = ?') ? produtos.filter(function porId(produto) { return produto.id === parametros[0]; }) : produtos;
-    return [encontrados.map(function copiar(produto) { return { ...produto }; })];
+  if (sql.startsWith('SELECT') && sql.includes('FROM animais')) {
+    const encontrados = sql.includes('WHERE id = ?') ? animais.filter(function porId(animal) { return animal.id === parametros[0]; }) : animais;
+    return [encontrados.map(function copiar(animal) { return { ...animal }; })];
   }
-  if (sql.startsWith('INSERT INTO produtos')) {
-    const [nome, descricao, categoria, preco, estoque] = parametros;
-    const id = Math.max(0, ...produtos.map(function obterId(produto) { return produto.id; })) + 1;
-    produtos.push({ id, nome, descricao, categoria, preco, estoque });
+  if (sql.startsWith('INSERT INTO animais')) {
+    const [usuario_id, nome, especie, raca, idade, unidade_idade, porte, sexo, cidade, descricao, saude, foto, status] = parametros;
+    const id = Math.max(0, ...animais.map(function obterId(animal) { return animal.id; })) + 1;
+    animais.push({ id, usuario_id, nome, especie, raca, idade, unidade_idade, porte, sexo, cidade, descricao, saude, foto, status });
     return [{ insertId: id, affectedRows: 1 }];
   }
-  if (sql.startsWith('UPDATE produtos')) {
-    const [nome, descricao, categoria, preco, estoque, id] = parametros;
-    const produto = produtos.find(function porId(item) { return item.id === id; });
-    if (produto) Object.assign(produto, { nome, descricao, categoria, preco, estoque });
-    return [{ affectedRows: produto ? 1 : 0 }];
+  if (sql.startsWith('UPDATE animais')) {
+    const [nome, especie, raca, idade, unidade_idade, porte, sexo, cidade, descricao, saude, foto, status, id] = parametros;
+    const animal = animais.find(function porId(item) { return item.id === id; });
+    if (animal) Object.assign(animal, { nome, especie, raca, idade, unidade_idade, porte, sexo, cidade, descricao, saude, foto, status });
+    return [{ affectedRows: animal ? 1 : 0 }];
   }
-  if (sql.startsWith('DELETE FROM produtos')) {
-    const indice = produtos.findIndex(function porId(produto) { return produto.id === parametros[0]; });
-    if (indice >= 0) produtos.splice(indice, 1);
+  if (sql.startsWith('DELETE FROM animais')) {
+    const indice = animais.findIndex(function porId(animal) { return animal.id === parametros[0]; });
+    if (indice >= 0) animais.splice(indice, 1);
     return [{ affectedRows: indice >= 0 ? 1 : 0 }];
   }
   throw new Error('Consulta não prevista no mock.');
@@ -115,8 +118,8 @@ async function requisitar(caminho, { metodo = 'GET', token, dados } = {}) {
   return { status: resposta.status, dados: await resposta.json(), headers: resposta.headers };
 }
 
-test('sem token, produtos e usuários retornam 401 antes de consultar o banco', async function verificarSemToken() {
-  for (const caminho of ['/produtos', '/produtos/1', '/usuarios', '/auth/me']) {
+test('sem token, animais e usuários retornam 401 antes de consultar o banco', async function verificarSemToken() {
+  for (const caminho of ['/animais', '/animais/1', '/usuarios', '/auth/me']) {
     assert.equal((await requisitar(caminho)).status, 401);
   }
   assert.equal(chamadas.length, 0);
@@ -125,13 +128,13 @@ test('sem token, produtos e usuários retornam 401 antes de consultar o banco', 
 test('JWT inválido, expirado ou com outro algoritmo retorna 401', async function verificarJwt() {
   const tokens = ['token-invalido', criarToken(1, { expiresIn: -1 }), criarToken(1, { algorithm: 'HS384' })];
   for (const token of tokens) {
-    assert.equal((await requisitar('/produtos', { token })).status, 401);
+    assert.equal((await requisitar('/animais', { token })).status, 401);
   }
   assert.equal(chamadas.length, 0);
 });
 
 test('Bearer malformado não autentica e usuário removido não mantém a sessão', async function verificarBearer() {
-  const resposta = await fetch(base + '/produtos', { headers: { Authorization: 'Basic ' + criarToken(1) } });
+  const resposta = await fetch(base + '/animais', { headers: { Authorization: 'Basic ' + criarToken(1) } });
   assert.equal(resposta.status, 401);
   assert.equal((await requisitar('/auth/me', { token: criarToken(999) })).status, 401);
 });
@@ -139,7 +142,7 @@ test('Bearer malformado não autentica e usuário removido não mantém a sessã
 test('cadastro ignora nivel admin e armazena somente um hash bcrypt de custo 10', async function verificarCadastro() {
   const resultado = await requisitar('/auth/cadastro', { metodo: 'POST', dados: { nome: ' Nova conta ', email: ' NOVA@EXAMPLE.TEST ', senha: senhaTeste, nivel: 'admin' } });
   assert.equal(resultado.status, 201);
-  assert.equal(resultado.dados.usuario.nivel, 'usuario');
+  assert.equal(resultado.dados.usuario.nivel, 'adotante');
   assert.equal(resultado.dados.usuario.email, 'nova@example.test');
   assert.equal('senha' in resultado.dados.usuario, false);
   const salva = usuarios.at(-1);
@@ -147,7 +150,7 @@ test('cadastro ignora nivel admin e armazena somente um hash bcrypt de custo 10'
   assert.equal(bcrypt.getRounds(salva.senha), 10);
   assert.equal(await bcrypt.compare(senhaTeste, salva.senha), true);
   const insercao = chamadas.find(function encontrar(chamada) { return chamada.sql.startsWith('INSERT'); });
-  assert.equal(insercao.parametros[3], 'usuario');
+  assert.equal(insercao.parametros[3], 'adotante');
   assert.equal(insercao.sql.includes('nova@example.test'), false);
 });
 
@@ -178,17 +181,17 @@ test('login com conta ausente e senha errada usa a mesma resposta genérica', as
   assert.equal(incorreta.status, 401);
   assert.equal(ausente.status, 401);
   assert.deepEqual(incorreta.dados, ausente.dados);
-  assert.equal(incorreta.dados.mensagem, 'E-mail ou senha inválidos');
+  assert.equal(incorreta.dados.mensagem, 'E-mail ou senha inválidos.');
 });
 
-test('usuário consulta produtos, detalhes e /me; não modifica produtos nem gerencia usuários', async function verificarUsuario() {
+test('usuário consulta animais, detalhes e /me; não modifica animais nem gerencia usuários', async function verificarUsuario() {
   const token = criarToken(1);
-  assert.equal((await requisitar('/produtos', { token })).status, 200);
-  assert.equal((await requisitar('/produtos/1', { token })).dados.nome, 'Mouse');
+  assert.equal((await requisitar('/animais', { token })).status, 200);
+  assert.equal((await requisitar('/animais/1', { token })).dados.nome, 'Luna');
   const atual = await requisitar('/auth/me', { token });
-  assert.deepEqual(atual.dados, { id: 1, nome: usuarios[0].nome, email: usuarios[0].email, nivel: 'usuario' });
+  assert.deepEqual(atual.dados, { id: 1, nome: usuarios[0].nome, email: usuarios[0].email, nivel: 'adotante' });
   for (const metodo of ['POST', 'PUT', 'DELETE']) {
-    const caminho = metodo === 'POST' ? '/produtos' : '/produtos/1';
+    const caminho = metodo === 'POST' ? '/animais' : '/animais/1';
     assert.equal((await requisitar(caminho, { metodo, token, dados: {} })).status, 403);
   }
   assert.equal((await requisitar('/usuarios', { token })).status, 403);
@@ -197,28 +200,27 @@ test('usuário consulta produtos, detalhes e /me; não modifica produtos nem ger
 
 test('administrador executa CRUD completo e recebe 404 após exclusão', async function verificarCrud() {
   const token = criarToken(2);
-  const dados = { nome: 'Teclado', descricao: 'Teclado USB', categoria: 'Periféricos', preco: 89.90, estoque: 5 };
-  const criada = await requisitar('/produtos', { metodo: 'POST', token, dados });
+  const dados = { ...dadosAnimal, nome: 'Mia' };
+  const criada = await requisitar('/animais', { metodo: 'POST', token, dados });
   assert.equal(criada.status, 201);
-  const id = criada.dados.produto.id;
-  assert.equal((await requisitar('/produtos/' + id, { token })).dados.nome, 'Teclado');
-  assert.equal((await requisitar('/produtos', { token })).dados.length, 2);
-  const alterada = await requisitar('/produtos/' + id, { metodo: 'PUT', token, dados: { ...dados, preco: 79.90, estoque: 4 } });
+  const id = criada.dados.animal.id;
+  assert.equal((await requisitar('/animais/' + id, { token })).dados.nome, 'Mia');
+  assert.equal((await requisitar('/animais', { token })).dados.length, 2);
+  const alterada = await requisitar('/animais/' + id, { metodo: 'PUT', token, dados: { ...dados, nome: 'Mia atualizada' } });
   assert.equal(alterada.status, 200);
-  assert.equal(alterada.dados.produto.preco, 79.90);
-  assert.equal((await requisitar('/produtos/' + id, { metodo: 'DELETE', token })).status, 200);
-  assert.equal((await requisitar('/produtos/' + id, { token })).status, 404);
-  assert.equal((await requisitar('/produtos/' + id, { metodo: 'DELETE', token })).status, 404);
+  assert.equal((await requisitar('/animais/' + id, { token })).dados.nome, 'Mia atualizada');
+  assert.equal((await requisitar('/animais/' + id, { metodo: 'DELETE', token })).status, 200);
+  assert.equal((await requisitar('/animais/' + id, { token })).status, 404);
+  assert.equal((await requisitar('/animais/' + id, { metodo: 'DELETE', token })).status, 404);
 });
 
-test('preço e estoque inválidos são rejeitados, incluindo coerções perigosas', async function verificarProdutoInvalido() {
+test('dados inválidos do animal são rejeitados', async function verificarAnimalInvalido() {
   const token = criarToken(2);
-  const baseProduto = { nome: 'Produto', preco: 10, estoque: 1 };
-  for (const alteracoes of [{ preco: -1 }, { preco: '' }, { preco: true }, { preco: 1.234 }, { preco: 100000000 }, { estoque: -1 }, { estoque: 1.5 }, { estoque: '' }, { estoque: true }, { nome: ' '.repeat(3) }, { descricao: 'x'.repeat(501) }]) {
-    assert.equal((await requisitar('/produtos', { metodo: 'POST', token, dados: { ...baseProduto, ...alteracoes } })).status, 400);
+  for (const alteracoes of [{ nome: ' ' }, { especie: 'Ave' }, { idade: -1 }, { idade: 1.5 }, { unidade_idade: 'dias' }, { porte: 'Inválido' }, { sexo: 'Inválido' }, { cidade: '' }, { foto: 'arquivo-local' }, { descricao: 'x'.repeat(1001) }]) {
+    assert.equal((await requisitar('/animais', { metodo: 'POST', token, dados: { ...dadosAnimal, ...alteracoes } })).status, 400);
   }
-  assert.equal((await requisitar('/produtos/1abc', { token })).status, 400);
-  assert.equal((await requisitar('/produtos/999', { metodo: 'PUT', token, dados: baseProduto })).status, 404);
+  assert.equal((await requisitar('/animais/1abc', { token })).status, 400);
+  assert.equal((await requisitar('/animais/999', { metodo: 'PUT', token, dados: dadosAnimal })).status, 404);
 });
 
 test('admin lista usuários sem hash e altera somente níveis válidos de outras contas', async function verificarAdministracao() {
@@ -226,7 +228,7 @@ test('admin lista usuários sem hash e altera somente níveis válidos de outras
   const lista = await requisitar('/usuarios', { token });
   assert.equal(lista.status, 200);
   for (const usuario of lista.dados) assert.equal('senha' in usuario, false);
-  assert.equal((await requisitar('/usuarios/2/nivel', { metodo: 'PUT', token, dados: { nivel: 'usuario' } })).status, 400);
+  assert.equal((await requisitar('/usuarios/2/nivel', { metodo: 'PUT', token, dados: { nivel: 'adotante' } })).status, 400);
   assert.equal((await requisitar('/usuarios/1/nivel', { metodo: 'PUT', token, dados: { nivel: 'superadmin' } })).status, 400);
   assert.equal((await requisitar('/usuarios/999/nivel', { metodo: 'PUT', token, dados: { nivel: 'admin' } })).status, 404);
   const promocao = await requisitar('/usuarios/1/nivel', { metodo: 'PUT', token, dados: { nivel: 'admin' } });
@@ -238,12 +240,12 @@ test('admin lista usuários sem hash e altera somente níveis válidos de outras
 test('rebaixamento revoga administração imediatamente, mesmo com JWT admin ainda válido', async function verificarRebaixamento() {
   const tokenAntigo = criarToken(3);
   assert.equal((await requisitar('/usuarios', { token: tokenAntigo })).status, 200);
-  const alteracao = await requisitar('/usuarios/3/nivel', { metodo: 'PUT', token: criarToken(2), dados: { nivel: 'usuario' } });
+  const alteracao = await requisitar('/usuarios/3/nivel', { metodo: 'PUT', token: criarToken(2), dados: { nivel: 'adotante' } });
   assert.equal(alteracao.status, 200);
   assert.equal(jwt.verify(tokenAntigo, process.env.JWT_SECRET).nivel, 'admin');
   assert.equal((await requisitar('/usuarios', { token: tokenAntigo })).status, 403);
-  assert.equal((await requisitar('/produtos', { metodo: 'POST', token: tokenAntigo, dados: {} })).status, 403);
-  assert.equal((await requisitar('/auth/me', { token: tokenAntigo })).dados.nivel, 'usuario');
+  assert.equal((await requisitar('/animais', { metodo: 'POST', token: tokenAntigo, dados: {} })).status, 403);
+  assert.equal((await requisitar('/auth/me', { token: tokenAntigo })).dados.nivel, 'adotante');
 });
 
 test('JSON malformado e corpo ausente produzem erro JSON compreensível', async function verificarCorpo() {
@@ -260,7 +262,7 @@ test('falha do banco vira 500 sem vazar detalhes, SQL ou senha', async function 
     const resultado = await requisitar('/auth/login', { metodo: 'POST', dados: { email: usuarios[0].email, senha: senhaTeste } });
     assert.equal(resultado.status, 500);
     assert.equal(JSON.stringify(resultado.dados).includes('Detalhe interno'), false);
-    assert.equal((await requisitar('/produtos', { token: criarToken(1) })).status, 500);
+    assert.equal((await requisitar('/animais', { token: criarToken(1) })).status, 500);
   } finally {
     pool.execute = executarEmMemoria;
   }

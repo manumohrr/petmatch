@@ -1,7 +1,7 @@
 import '../config/ambiente.js';
 import mysql from 'mysql2/promise';
 
-// O pool reaproveita conexões. Credenciais vêm do ambiente, nunca do código-fonte.
+// Conexão do PetMatch com o banco de dados MySQL
 const pool = mysql.createPool({
   host: process.env.DB_HOST,
   port: Number(process.env.DB_PORT || 3306),

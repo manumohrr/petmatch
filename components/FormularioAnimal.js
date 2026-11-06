@@ -1,6 +1,6 @@
 
 import React from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { Botao, Campo, cores } from './ui.js';
 
 // VALIDAR E PREPARAR OS DADOS DO ANIMAL
@@ -103,13 +103,17 @@ export function prepararAnimal(campos) {
   }
 
   // VALIDAR STATUS
-  if (
-    !['disponivel', 'em_processo', 'adotado'].includes(status)
-  ) {
-    throw new Error(
-      'Informe um status de adoção válido.'
-    );
-  }
+  // VALIDAR STATUS
+if (
+  ![
+    'disponivel',
+    'indisponivel',
+    'em_processo',
+    'adotado',
+  ].includes(status)
+) {
+  throw new Error('Informe um status de adoção válido.');
+}
 
   return {
     nome,

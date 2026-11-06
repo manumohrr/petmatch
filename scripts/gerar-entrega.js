@@ -125,8 +125,8 @@ function comandosDaEntrega() {
     'Para criar um projeto novo durante a construção em aula:',
     '',
     cercarCodigo([
-      'npx create-expo-app@latest loja-jwt --template blank',
-      'cd loja-jwt',
+      'npx create-expo-app@latest petmatch --template blank',
+      'cd petmatch',
       'npm install @react-navigation/native',
       'npm install @react-navigation/native-stack',
       'npx expo install react-native-screens react-native-safe-area-context',
@@ -136,13 +136,12 @@ function comandosDaEntrega() {
     ].join('\n'), 'bash'),
     'Para executar os arquivos já entregues, entre na pasta e instale as versões do lock:',
     '',
-    cercarCodigo('cd loja-jwt\nnpm ci', 'bash'),
-    'Execute `database/loja_jwt.sql` no MySQL Workbench. No PowerShell, copie o modelo local:',
+    cercarCodigo('cd petmatch\nnpm ci', 'bash'),
+    'Para um banco novo, use `database/petmatch.sql`. CREATE TABLE IF NOT EXISTS não migra tabelas existentes; revise uma migração antes de usar em banco com dados.',
     '',
-    cercarCodigo('Copy-Item -LiteralPath backend/.env.example -Destination backend/.env', 'powershell'),
-    'Preencha o arquivo local com suas configurações e um segredo JWT próprio. Nenhum `.env` acompanha esta entrega.',
+    'A API lê a configuração local de `backend/.env`: DB_HOST, DB_PORT, DB_USER, DB_PASSWORD, DB_NAME=petmatch_db, PORT e JWT_SECRET (pelo menos 32 caracteres). Não sobrescreva um arquivo existente. Nenhum `.env` acompanha esta entrega; não há `.env.example` nesta versão.',
     '',
-    'O SQL insere duas contas demonstrativas: `usuario@loja.com` / `Usuario@123` (nível `usuario`) e `admin@loja.com` / `Admin@123` (nível `admin`). São senhas públicas para aula; no banco, somente hashes bcrypt com custo 10. Ao reimportar, `INSERT IGNORE` preserva contas existentes, inclusive suas senhas e níveis. As credenciais acima valem para as contas criadas pelo SQL.',
+    'O SQL define as quatro tabelas do PetMatch e não insere contas ou senhas demonstrativas.',
     '',
     'Opcionalmente, configure `ADMIN_NOME`, `ADMIN_EMAIL` e `ADMIN_SENHA` no `.env` para criar um administrador próprio com outro e-mail. O script não altera a senha nem o nível de uma conta existente:',
     '',
@@ -173,11 +172,11 @@ async function gerarEntrega() {
   const estrutura = await lerEstrutura(pastaProjeto);
   const arquivos = listarArquivos(estrutura);
   const partes = [
-    '# LOJA JWT — entrega completa',
+    '# PetMatch — entrega completa',
     '',
     '## 1. Estrutura completa de pastas e arquivos',
     '',
-    cercarCodigo('loja-jwt/\n' + desenharArvore(estrutura).join('\n'), 'text'),
+    cercarCodigo('petmatch/\n' + desenharArvore(estrutura).join('\n'), 'text'),
     'A árvore lista os fontes e os assets originais. Imagens são entregues nos arquivos de `assets/` e não são convertidas em texto neste documento. Dependências instaladas, caches, resultados gerados e credenciais locais ficam fora da consolidação.',
     '',
     comandosDaEntrega(),
@@ -190,7 +189,7 @@ async function gerarEntrega() {
     if (!arquivo.texto) continue;
     const conteudo = await readFile(path.join(pastaProjeto, arquivo.relativo), 'utf8');
     if (conteudo.includes('\u0000')) throw new Error('Arquivo classificado como texto contém bytes nulos: ' + arquivo.relativo);
-    partes.push('### loja-jwt/' + arquivo.relativo, '', cercarCodigo(conteudo, linguagemArquivo(arquivo.nome)), '');
+    partes.push('### petmatch/' + arquivo.relativo, '', cercarCodigo(conteudo, linguagemArquivo(arquivo.nome)), '');
     quantidadeTexto += 1;
   }
 

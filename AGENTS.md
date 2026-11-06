@@ -1,4 +1,4 @@
-# LOJA JWT
+# PetMatch
 
 Projeto didático para alunos do 3º ano do Ensino Médio Técnico. Priorize código
 simples, funções tradicionais, comentários explicativos em português e
@@ -15,9 +15,9 @@ compatibilidade com Expo Web, Android e iOS.
 - Todo código Node usa ES Modules e extensão `.js` nos imports locais.
 - Use `fetch`, Express, mysql2/promise, bcryptjs e jsonwebtoken, sem ORM.
 - Nunca versione `backend/.env`, salve senhas no aplicativo ou retorne hashes.
-- Cadastro público define `usuario` no servidor. Rotas administrativas exigem
+- Cadastro público define `adotante` no servidor. Rotas administrativas exigem
   `autenticarToken` e `somenteAdmin`; o nível atual vem do banco.
-- Não acrescente pagamento, carrinho, frete, checkout ou imagens de produtos.
+- Não acrescente pagamento, carrinho, frete, checkout ou funcionalidades de comércio.
 
 As instruções específicas acima substituem as recomendações genéricas de
 navegação do template do Expo que originou este projeto.
@@ -52,7 +52,7 @@ and `npm run test:mysql` for the optional isolated MySQL integration test.
 
 - Use Native Stack in `App.js`, as required by the teaching plan.
 - Keep screens in `screens/` and shared visual components in `components/`.
-- Pass the product ID through `route.params.id` and session data through Props.
+- Pass the animal ID through `route.params.id` and session data through Props.
 - Docs: https://reactnavigation.org/docs/getting-started/
 
 ## Building with EAS

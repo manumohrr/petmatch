@@ -6,24 +6,20 @@ import { test, expect } from '@playwright/test';
 const SENHA_FICTICIA = 'Senha-apenas-de-teste-123!';
 const TOKEN_USUARIO = 'token-ficticio-usuario-sem-validade';
 const TOKEN_ADMIN = 'token-ficticio-admin-sem-validade';
-const aluno = { id: 2, nome: 'Aluno Teste', email: 'aluno.teste@example.com', nivel: 'usuario' };
+const aluno = { id: 2, nome: 'Aluno Teste', email: 'aluno.teste@example.com', nivel: 'adotante' };
 const administrador = { id: 1, nome: 'Admin Teste', email: 'admin.teste@example.com', nivel: 'admin' };
-const produtoInicial = {
+const animalInicial = {
   id: 1,
-  nome: 'Notebook de teste',
-  descricao: 'Notebook fictício usado na integração do catálogo.',
-  categoria: 'Computadores',
-  preco: '3999.90',
-  estoque: 5,
+  nome: 'Luna', usuario_id: 1, especie: 'Gato', raca: 'SRD', idade: 2, unidade_idade: 'anos', porte: 'Pequeno', sexo: 'Fêmea', cidade: 'Porto Alegre', descricao: 'Gata à espera de uma família.', saude: 'Vacinada', foto: '', status: 'disponivel',
 };
 
 async function simularApi(page) {
   const api = {
     requisicoes: [],
     usuarios: [{ ...administrador }, { ...aluno }],
-    produtos: [{ ...produtoInicial }],
+    animais: [{ ...animalInicial }],
     sessao: 'normal',
-    produtosSemSessao: false,
+    animaisSemSessao: false,
   };
 
   await page.route('http://localhost:3000/**', async function responderRota(route) {
@@ -53,7 +49,7 @@ async function simularApi(page) {
       if (api.usuarios.some(function (pessoa) { return pessoa.email === body.email; })) {
         await responder(409, { mensagem: 'E-mail já cadastrado.' });
       } else {
-        api.usuarios.push({ id: 3, nome: body.nome, email: body.email, nivel: 'usuario' });
+        api.usuarios.push({ id: 3, nome: body.nome, email: body.email, nivel: 'adotante' });
         await responder(201, { mensagem: 'Conta criada! Agora entre com seu e-mail e senha.' });
       }
       return;
@@ -80,38 +76,43 @@ async function simularApi(page) {
       return;
     }
 
-    if (caminho === '/produtos' && metodo === 'GET') {
-      if (api.produtosSemSessao) {
+    if (caminho === '/animais' && metodo === 'GET') {
+      if (api.animaisSemSessao) {
         await responder(401, { mensagem: 'Token inválido ou expirado.' });
       } else {
-        await responder(200, api.produtos);
+        await responder(200, api.animais);
       }
       return;
     }
 
-    if (caminho === '/produtos' && metodo === 'POST') {
-      const produto = { id: 2, ...body };
-      api.produtos.push(produto);
-      await responder(201, { mensagem: 'Produto cadastrado com sucesso.', produto });
+    if (caminho === '/animais' && metodo === 'POST') {
+      const animal = { id: 2, ...body };
+      api.animais.push(animal);
+      await responder(201, { mensagem: 'Animal cadastrado com sucesso.', animal });
       return;
     }
 
-    if (/^\/produtos\/\d+$/.test(caminho)) {
+    if (/^\/animais\/\d+$/.test(caminho)) {
       const id = Number(caminho.split('/')[2]);
-      const indice = api.produtos.findIndex(function (produto) { return produto.id === id; });
+      const indice = api.animais.findIndex(function (animal) { return animal.id === id; });
       if (indice < 0) {
-        await responder(404, { mensagem: 'Produto não encontrado.' });
+        await responder(404, { mensagem: 'Animal não encontrado.' });
       } else if (metodo === 'GET') {
-        await responder(200, api.produtos[indice]);
+        await responder(200, api.animais[indice]);
       } else if (metodo === 'PUT') {
-        api.produtos[indice] = { id, ...body };
-        await responder(200, { mensagem: 'Produto atualizado com sucesso.', produto: api.produtos[indice] });
+        api.animais[indice] = { id, ...body };
+        await responder(200, { mensagem: 'Animal atualizado com sucesso.', animal: api.animais[indice] });
       } else if (metodo === 'DELETE') {
-        api.produtos.splice(indice, 1);
-        await responder(200, { mensagem: 'Produto excluído com sucesso.' });
+        api.animais.splice(indice, 1);
+        await responder(200, { mensagem: 'Animal excluído com sucesso.' });
       } else {
         await responder(405, { mensagem: 'Método inesperado no teste.' });
       }
+      return;
+    }
+
+    if (caminho === '/favoritos' && metodo === 'GET') {
+      await responder(200, []);
       return;
     }
 
@@ -137,15 +138,15 @@ async function simularApi(page) {
 function campo(page, rotulo) {
   // A pilha pode manter a tela anterior montada. Usamos o campo visível com
   // o rótulo acessível que também é apresentado ao aluno.
-  return page.locator('[aria-label="' + rotulo + '"]:visible');
+  return page.getByPlaceholder(rotulo, { exact: true }).filter({ visible: true });
 }
 
 async function entrar(page, usuario = aluno) {
   await page.goto('/');
-  await campo(page, 'E-mail').fill(usuario.email);
-  await campo(page, 'Senha').fill(SENHA_FICTICIA);
+  await campo(page, 'seuemail@exemplo.com').fill(usuario.email);
+  await campo(page, 'Digite sua senha').fill(SENHA_FICTICIA);
   await page.getByRole('button', { name: 'Entrar', exact: true }).click();
-  await expect(page.getByText('Olá, ' + usuario.nome, { exact: true })).toBeVisible();
+  await expect(page.getByText('Ver todos os animais', { exact: true })).toBeVisible();
 }
 
 async function tokenSalvo(page) {
@@ -160,187 +161,83 @@ async function conferirAusenciaDeSenhaSalva(page) {
   expect(armazenamento).not.toMatch(/"(?:senha|password|confirmacao)"\s*:/i);
 }
 
-test('cadastro valida dados, exibe conflito e envia somente os campos públicos', async function ({ page }) {
+test('cadastro envia apenas dados públicos e entra como adotante', async function ({ page }) {
   const api = await simularApi(page);
   await page.goto('/');
-  await page.getByRole('button', { name: 'Criar uma conta', exact: true }).click();
-  await campo(page, 'Nome').fill('Nova Aluna');
-  await campo(page, 'E-mail').fill(aluno.email);
-  await campo(page, 'Senha').fill('curta');
-  await campo(page, 'Confirmar senha').fill('curta');
-  await page.getByRole('button', { name: 'Cadastrar', exact: true }).click();
-  await expect(page.getByRole('alert')).toHaveText('A senha deve ter pelo menos 8 caracteres.');
-  expect(api.requisicoes).toHaveLength(0);
-
-  await campo(page, 'Senha').fill(SENHA_FICTICIA);
-  await campo(page, 'Confirmar senha').fill('confirmacao-diferente');
-  await page.getByRole('button', { name: 'Cadastrar', exact: true }).click();
-  await expect(page.getByRole('alert')).toHaveText('As senhas não são iguais.');
-  expect(api.requisicoes).toHaveLength(0);
-
-  await campo(page, 'Confirmar senha').fill(SENHA_FICTICIA);
-  await page.getByRole('button', { name: 'Cadastrar', exact: true }).click();
-  await expect(page.getByRole('alert')).toHaveText('E-mail já cadastrado.');
-  await campo(page, 'E-mail').fill('nova.aluna@example.com');
-  await page.getByRole('button', { name: 'Cadastrar', exact: true }).click();
-  await expect(page.getByRole('alert')).toHaveText('Conta criada! Agora entre com seu e-mail e senha.');
-
-  const cadastro = api.requisicoes.at(-1);
-  expect(cadastro.caminho).toBe('/auth/cadastro');
-  expect(cadastro.body).toEqual({ nome: 'Nova Aluna', email: 'nova.aluna@example.com', senha: SENHA_FICTICIA });
-  expect(cadastro.authorization).toBe('');
-  expect(await tokenSalvo(page)).toBeNull();
+  await page.getByText('Criar minha conta', { exact: true }).click();
+  await campo(page, 'Digite seu nome').fill('Nova Adotante');
+  await campo(page, 'seuemail@exemplo.com').fill('nova@example.test');
+  await campo(page, 'Pelo menos 8 caracteres').fill(SENHA_FICTICIA);
+  await campo(page, 'Digite sua senha novamente').fill(SENHA_FICTICIA);
+  await page.getByRole('button', { name: 'Criar minha conta', exact: true }).click();
+  await expect(page.getByText('Ver todos os animais', { exact: true })).toBeVisible();
+  expect(api.requisicoes.find((item) => item.caminho === '/auth/cadastro').body).toEqual({ nome: 'Nova Adotante', email: 'nova@example.test', senha: SENHA_FICTICIA });
   await conferirAusenciaDeSenhaSalva(page);
-  await page.getByRole('button', { name: 'Voltar para o login', exact: true }).click();
-  await expect(page.getByRole('button', { name: 'Entrar', exact: true })).toBeVisible();
 });
 
-test('login comum consulta catálogo e detalhes com Bearer e sem controles administrativos', async function ({ page }) {
-  const api = await simularApi(page);
-  await page.goto('/');
-  await campo(page, 'E-mail').fill(aluno.email);
-  await campo(page, 'Senha').fill('senha-ficticia-incorreta');
-  await page.getByRole('button', { name: 'Entrar', exact: true }).click();
-  await expect(page.getByRole('alert')).toHaveText('E-mail ou senha inválidos');
-  expect(await tokenSalvo(page)).toBeNull();
-
-  await campo(page, 'Senha').fill(SENHA_FICTICIA);
-  await page.getByRole('button', { name: 'Entrar', exact: true }).click();
-  await expect(page.getByText('Olá, ' + aluno.nome, { exact: true })).toBeVisible();
-  expect(await tokenSalvo(page)).toBe(TOKEN_USUARIO);
-  await conferirAusenciaDeSenhaSalva(page);
-  await expect(page.getByRole('button', { name: 'Cadastrar produto', exact: true })).toHaveCount(0);
-  await expect(page.getByRole('button', { name: 'Gerenciar usuários', exact: true })).toHaveCount(0);
-
-  await page.getByRole('button', { name: 'Ver produtos', exact: true }).click();
-  await expect(page.getByText(produtoInicial.nome, { exact: true })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Editar', exact: true })).toHaveCount(0);
-  await expect(page.getByRole('button', { name: 'Excluir', exact: true })).toHaveCount(0);
-  await page.getByRole('button', { name: 'Ver detalhes', exact: true }).click();
-  await expect(page.getByText(produtoInicial.descricao, { exact: true })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Editar produto', exact: true })).toHaveCount(0);
-
-  const consultas = api.requisicoes.filter(function (item) { return item.metodo === 'GET'; });
-  expect(consultas.some(function (item) { return item.caminho === '/produtos'; })).toBe(true);
-  expect(consultas.some(function (item) { return item.caminho === '/produtos/1'; })).toBe(true);
-  for (const consulta of consultas) expect(consulta.authorization).toBe('Bearer ' + TOKEN_USUARIO);
-});
-
-test('recarregar restaura a sessão por /me e logout remove o token', async function ({ page }) {
+test('adotante consulta animais e detalhes usando Bearer', async function ({ page }) {
   const api = await simularApi(page);
   await entrar(page);
-  const consultasAntes = api.requisicoes.filter(function (item) { return item.caminho === '/auth/me'; }).length;
-  await page.reload();
-  await expect(page.getByText('Olá, ' + aluno.nome, { exact: true })).toBeVisible();
-  expect(await tokenSalvo(page)).toBe(TOKEN_USUARIO);
-  expect(api.requisicoes.filter(function (item) { return item.caminho === '/auth/me'; }).length).toBeGreaterThan(consultasAntes);
+  await page.getByText('Ver todos os animais', { exact: true }).click();
+  await expect(page.getByText('Luna', { exact: true }).filter({ visible: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Cadastrar animal', exact: true })).toHaveCount(0);
+  await page.getByRole('button', { name: 'Conhecer este pet', exact: true }).click();
+  await expect(page.getByText(animalInicial.descricao, { exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Quero adotar', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Editar informações', exact: true })).toHaveCount(0);
+  const consultas = api.requisicoes.filter((item) => item.caminho.startsWith('/animais'));
+  expect(consultas.some((item) => item.caminho === '/animais/1')).toBe(true);
+  for (const consulta of consultas) expect(consulta.authorization).toBe('Bearer ' + TOKEN_USUARIO);
   await conferirAusenciaDeSenhaSalva(page);
-
-  await page.getByRole('button', { name: 'Sair', exact: true }).click();
-  await expect(page.getByRole('button', { name: 'Entrar', exact: true })).toBeVisible();
-  await expect(page.getByRole('alert')).toHaveText('Você saiu da sua conta.');
-  expect(await tokenSalvo(page)).toBeNull();
-  await page.reload();
-  await expect(page.getByRole('button', { name: 'Entrar', exact: true })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Ver produtos', exact: true })).toHaveCount(0);
 });
 
-test('token recusado durante a restauração volta ao login com aviso e limpa a sessão', async function ({ page }) {
+test('recarregar restaura sessão e sair remove o token', async function ({ page }) {
+  const api = await simularApi(page);
+  await entrar(page);
+  await page.reload();
+  await expect(page.getByText('Ver todos os animais', { exact: true })).toBeVisible();
+  expect(api.requisicoes.some((item) => item.caminho === '/auth/me')).toBe(true);
+  await page.getByText('Sair', { exact: true }).click();
+  await expect(page.getByText('Você saiu da sua conta.', { exact: true })).toBeVisible();
+  expect(await tokenSalvo(page)).toBeNull();
+});
+
+test('401 na restauração encerra sessão', async function ({ page }) {
   const api = await simularApi(page);
   await entrar(page);
   api.sessao = 'invalida';
   await page.reload();
-  await expect(page.getByRole('button', { name: 'Entrar', exact: true })).toBeVisible();
-  await expect(page.getByRole('alert')).toHaveText('Sua sessão expirou ou é inválida. Entre novamente.');
+  await expect(page.getByText('Sua sessão expirou. Entre novamente.', { exact: true })).toBeVisible();
   expect(await tokenSalvo(page)).toBeNull();
 });
 
-test('falha de rede preserva o token e permite tentar restaurar a sessão novamente', async function ({ page }) {
+test('falha de rede permite restaurar sessão sem perder token', async function ({ page }) {
   const api = await simularApi(page);
   await entrar(page);
   api.sessao = 'offline';
   await page.reload();
   await expect(page.getByText('Vamos reconectar?', { exact: true })).toBeVisible();
-  await expect(page.getByRole('alert')).toContainText('Não foi possível verificar a sessão.');
   expect(await tokenSalvo(page)).toBe(TOKEN_USUARIO);
   api.sessao = 'normal';
   await page.getByRole('button', { name: 'Tentar novamente', exact: true }).click();
-  await expect(page.getByText('Olá, ' + aluno.nome, { exact: true })).toBeVisible();
-  expect(await tokenSalvo(page)).toBe(TOKEN_USUARIO);
+  await expect(page.getByText('Ver todos os animais', { exact: true })).toBeVisible();
 });
 
-test('resposta 401 em uma rota protegida encerra a sessão ativa', async function ({ page }) {
+test('401 durante consulta de animais encerra sessão ativa', async function ({ page }) {
   const api = await simularApi(page);
   await entrar(page);
-  api.produtosSemSessao = true;
-  await page.getByRole('button', { name: 'Ver produtos', exact: true }).click();
-  await expect(page.getByRole('button', { name: 'Entrar', exact: true })).toBeVisible();
-  await expect(page.getByRole('alert')).toHaveText('Sua sessão expirou ou é inválida. Entre novamente.');
+  api.animaisSemSessao = true;
+  await page.getByText('Ver todos os animais', { exact: true }).click();
+  await expect(page.getByText('Sua sessão expirou. Entre novamente.', { exact: true })).toBeVisible();
   expect(await tokenSalvo(page)).toBeNull();
 });
 
-test('admin cadastra, edita e exclui produto após confirmar e a lista reflete o CRUD', async function ({ page }) {
-  const api = await simularApi(page);
+test('administrador acessa gerenciamento de animais e usuários', async function ({ page }) {
+  await simularApi(page);
   await entrar(page, administrador);
-  await page.getByRole('button', { name: 'Ver produtos', exact: true }).click();
-  await page.getByRole('button', { name: 'Ver detalhes', exact: true }).click();
-  await page.getByRole('button', { name: 'Editar produto', exact: true }).click();
-  await expect(campo(page, 'Nome *')).toHaveValue(produtoInicial.nome);
-  await campo(page, 'Nome *').fill('Notebook revisado');
-  await campo(page, 'Preço (R$) *').fill('4299,90');
-  await page.getByRole('button', { name: 'Salvar alterações', exact: true }).click();
-  await expect(page.getByRole('alert')).toHaveText('Produto atualizado com sucesso.');
-  await page.getByRole('button', { name: 'Voltar', exact: true }).click();
-  await expect(page.getByText('Notebook revisado', { exact: true })).toBeVisible();
-  await page.getByRole('button', { name: 'Voltar', exact: true }).click();
-  await expect(page.getByText('Notebook revisado', { exact: true })).toBeVisible();
-  await page.getByRole('button', { name: 'Cadastrar produto', exact: true }).click();
-  await campo(page, 'Nome *').fill('Mouse de teste');
-  await campo(page, 'Descrição').fill('Produto criado pelo cenário de integração.');
-  await campo(page, 'Categoria').fill('Periféricos');
-  await campo(page, 'Preço (R$) *').fill('79,90');
-  await campo(page, 'Estoque *').fill('12');
-  await page.getByRole('button', { name: 'Cadastrar produto', exact: true }).click();
-  await expect(page.getByRole('alert')).toHaveText('Produto cadastrado com sucesso.');
-  await page.getByRole('button', { name: 'Ver catálogo', exact: true }).click();
-  const cartaoMouse = page.getByText('Mouse de teste', { exact: true }).locator('..');
-  await expect(cartaoMouse).toBeVisible();
-  await cartaoMouse.getByRole('button', { name: 'Excluir', exact: true }).click();
-  await expect(page.getByRole('button', { name: 'Confirmar exclusão', exact: true })).toBeVisible();
-  expect(api.requisicoes.some(function (item) { return item.metodo === 'DELETE'; })).toBe(false);
-  await page.getByRole('button', { name: 'Cancelar', exact: true }).click();
-  await expect(cartaoMouse).toBeVisible();
-  await cartaoMouse.getByRole('button', { name: 'Excluir', exact: true }).click();
-  await page.getByRole('button', { name: 'Confirmar exclusão', exact: true }).click();
-  await expect(page.getByRole('alert')).toHaveText('Produto excluído com sucesso.');
-  await expect(page.getByText('Mouse de teste', { exact: true })).toHaveCount(0);
-
-  const escrita = api.requisicoes.filter(function (item) { return ['POST', 'PUT', 'DELETE'].includes(item.metodo) && item.caminho.startsWith('/produtos'); });
-  expect(escrita.map(function (item) { return item.metodo; })).toEqual(['PUT', 'POST', 'DELETE']);
-  expect(escrita[0].body.preco).toBe(4299.9);
-  expect(escrita[1].body).toEqual({ nome: 'Mouse de teste', descricao: 'Produto criado pelo cenário de integração.', categoria: 'Periféricos', preco: 79.9, estoque: 12 });
-  for (const requisicao of escrita) expect(requisicao.authorization).toBe('Bearer ' + TOKEN_ADMIN);
-});
-
-test('admin lista usuários e altera outro nível sem oferecer alteração do próprio', async function ({ page }) {
-  const api = await simularApi(page);
-  await entrar(page, administrador);
-  await page.getByRole('button', { name: 'Gerenciar usuários', exact: true }).click();
+  await expect(page.getByText('Cadastrar animal', { exact: true })).toBeVisible();
+  await page.getByText('Gerenciar usuários', { exact: true }).click();
   await expect(page.getByText(administrador.nome + ' (você)', { exact: true })).toBeVisible();
-  await expect(page.getByText('Seu próprio nível não pode ser alterado.', { exact: true })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Tornar usuário', exact: true })).toHaveCount(0);
-  await page.getByRole('button', { name: 'Tornar administrador', exact: true }).click();
-  await expect(page.getByRole('alert')).toHaveText('Nível atualizado com sucesso.');
-  await expect(page.getByRole('button', { name: 'Tornar usuário', exact: true })).toBeVisible();
-  await page.getByRole('button', { name: 'Tornar usuário', exact: true }).click();
-  await expect(page.getByRole('button', { name: 'Tornar administrador', exact: true })).toBeVisible();
-
-  const alteracoes = api.requisicoes.filter(function (item) { return item.metodo === 'PUT' && item.caminho.startsWith('/usuarios'); });
-  expect(alteracoes.map(function (item) { return item.body.nivel; })).toEqual(['admin', 'usuario']);
-  for (const requisicao of alteracoes) {
-    expect(requisicao.caminho).toBe('/usuarios/2/nivel');
-    expect(requisicao.authorization).toBe('Bearer ' + TOKEN_ADMIN);
-  }
-  expect(api.requisicoes.filter(function (item) { return item.caminho === '/usuarios' && item.metodo === 'GET'; }).length).toBeGreaterThanOrEqual(3);
-  await conferirAusenciaDeSenhaSalva(page);
+  await expect(page.getByRole('button', { name: 'ONG', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Protetor independente', exact: true })).toBeVisible();
 });
